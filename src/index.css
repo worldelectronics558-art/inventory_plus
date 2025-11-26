@@ -1,0 +1,227 @@
+/* D:/inventoryplus/src/index.css */
+
+@import "tailwindcss";
+
+/* 🚨 IMPORTANT: Load the new configuration file first 🚨 */
+@config "../tailwind.config.js"; 
+
+/* ----------------------------------------------------
+    1. BASE LAYER (No Custom Variables Needed Here Anymore)
+----------------------------------------------------- */
+
+@layer base {
+  body {
+    /* Use generated classes for background and text */
+    @apply bg-[rgb(248_250_252)] text-primary-900 font-sans antialiased;
+  }
+
+  h1 { @apply text-3xl font-bold text-primary-900; }
+  h2 { @apply text-2xl font-semibold text-primary-900; }
+  h3 { @apply text-xl font-medium text-primary-900; }
+
+  p { @apply text-primary-900; }
+
+  /* Use generated class for action color */
+  a { @apply text-action-500 hover:underline; }
+
+  /* INPUTS / TEXTAREAS / SELECTS */
+  input, select, textarea {
+    @apply w-full bg-white text-primary-900
+      border border-[rgb(207_217_228)]
+      rounded-lg px-3 py-2.5 shadow-sm
+      placeholder:text-[rgb(148_163_184)]
+      /* Use generated classes for focus ring/border */
+      focus:outline-none focus:ring-2 focus:ring-secondary-700 focus:border-secondary-700;
+  }
+
+  /* Scrollbar (No change) */
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-track { background: rgb(241 245 249); }
+  ::-webkit-scrollbar-thumb { background: rgb(148 163 184); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgb(107 114 128); }
+}
+
+/* ----------------------------------------------------
+    2. COMPONENTS (Using fully generated classes!)
+----------------------------------------------------- */
+@layer components {
+
+  /* INPUT COMPONENT CLASS */
+  .input-base {
+    /* Uses generated classes */
+    @apply w-full bg-secondary-50 text-primary-900
+      border border-[rgb(207_217_228)]
+      rounded-lg px-3 py-2.5 shadow-sm
+      placeholder:text-[rgb(148_163_184)]
+      focus:outline-none focus:ring-2 focus:ring-secondary-700 focus:border-secondary-700;
+  }
+
+  /* ERROR & SUCCESS MESSAGES */
+  .error-message { @apply text-danger-500 text-sm mt-1; }
+  .success-message { @apply text-[rgb(34_197_94)] text-sm mt-1; }
+
+  /* BUTTONS */
+  .btn {
+    @apply inline-flex items-center justify-center
+      px-4 py-1 rounded-lg font-medium select-none
+      transition-all duration-200 cursor-pointer shadow-sm;
+  }
+
+  .btn-primary {
+    @apply text-white bg-secondary-700
+      bg-gradient-to-b from-[rgba(255,255,255,0.18)] to-[rgba(0,0,0,0.08)]
+      hover:bg-secondary-900
+      active:shadow-inner;
+  }
+
+  .btn-secondary {
+    @apply text-white bg-action-500
+      bg-gradient-to-b from-[rgba(255,255,255,0.18)] to-[rgba(0,0,0,0.06)]
+      hover:bg-action-700
+      active:shadow-inner;
+  }
+
+  .btn-accent {
+    @apply text-primary-900 bg-accent-500
+      hover:bg-accent-700
+      active:shadow-inner;
+  }
+
+  .btn-outline-primary {
+    @apply bg-white border border-secondary-700
+      text-secondary-700
+      hover:bg-secondary-50;
+  }
+
+  .btn-outline-danger {
+    @apply bg-white border border-danger-500
+      text-danger-500
+      hover:bg-danger-50;
+  }
+
+  .btn-danger {
+    @apply text-white bg-danger-500
+      hover:bg-danger-700
+      active:shadow-inner;
+  }
+
+  /* Sizes (no change) */
+  .btn-sm { @apply text-sm px-3 py-1.5; }
+  .btn-lg { @apply text-lg px-6 py-3; }
+
+  /* CARD (no change) */
+  .card {
+    @apply bg-white rounded-lg border border-gray-200 
+      shadow-sm p-4;
+  }
+
+  /* SIDEBAR */
+  .sidebar {
+    @apply flex flex-col h-screen w-64 fixed left-0 top-0
+           text-white overflow-y-auto shadow-2xl p-0
+           /* Use generated classes for the gradient */
+           bg-linear-to-r from-primary-900 to-secondary-700;
+}
+
+  .sidebar-header {
+      @apply bg-primary-900 text-white p-4 text-center border-b border-primary-900;
+  }
+
+  .sidebar-user-info {
+      @apply text-xs text-[#c1f4ee] p-2 border-b border-primary-900;
+      word-break: break-all;
+  }
+
+  .sidebar-link {
+      @apply flex items-center w-full px-4 py-3 text-sm font-medium rounded-lg transition-colors;
+  }
+
+    .sidebar-link:not(.active) {
+      @apply hover:bg-secondary-900 hover:text-white;
+  }
+
+  .sidebar-link.active {
+      @apply bg-secondary-900 font-bold;
+  }
+
+  .sidebar-footer {
+      @apply border-t border-primary-900 p-2;
+  }
+  
+  .main-content {
+    @apply ml-64 p-8 bg-[rgb(249_250_251)] min-h-screen;
+  }
+
+  /* TITLES */
+  .page-title { @apply text-3xl font-extrabold text-primary-900 mb-8 tracking-tight; }
+
+  .section-title {
+    @apply text-xl font-semibold text-primary-900 mb-4
+      border-b border-[rgb(229_231_235)] pb-2;
+  }
+
+  /* TABLE */
+  .table { @apply w-full border-collapse text-left; }
+
+  .table th {
+    @apply bg-secondary-50 text-primary-900
+      font-semibold py-2.5 px-3 border-b border-[rgb(229_231_235)];
+  }
+
+  .table td {
+    @apply py-2.5 px-3 border-b border-[rgb(243_244_246)]
+      text-primary-900;
+  }
+
+  .table tr:hover td { @apply bg-secondary-50; }
+
+  /* BADGES */
+  .badge { @apply inline-block px-2.5 py-1 text-xs font-semibold rounded-full; }
+  .badge-success { @apply bg-action-50 text-action-500; }
+  .badge-danger { @apply bg-danger-50 text-danger-500; }
+  .badge-info { @apply bg-[rgb(219_234_254)] text-[rgb(37_99_235)]; }
+
+  /* MODAL BACKDROP (no change) */
+  .modal-backdrop { @apply fixed inset-0 bg-black/40 backdrop-blur-sm; }
+}
+
+/* ----------------------------------------------------
+    AG-GRID THEME (No change)
+---------------------------------------------------- */
+/* We must keep the AG-Grid colors defined as pure CSS vars */
+.ag-theme-indigo {
+    --ag-foreground-color: #264653; /* primary-900 */
+    --ag-background-color: #ffffff;
+    --ag-header-height: 40px;
+    --ag-header-background-color: #f0fffe; /* secondary-50 */
+    --ag-header-foreground-color: #2A9D8F; /* secondary-700 */
+    --ag-header-border-color: #d1f7f4; 
+    --ag-header-column-separator-color: #c0f4ef;
+    --ag-border-color: #e5e7eb;
+    --ag-row-border-color: transparent;
+    --ag-odd-row-background-color: #f9fafb;
+    --ag-even-row-background-color: #ffffff;
+    --ag-row-hover-color: #f0fffe; /* secondary-50 */
+    --ag-selected-row-background-color: #e6fdfa;
+    --ag-font-size: 14px;
+    --ag-secondary-foreground-color: #4b5563;
+    --ag-secondary-border-color: #e5e7eb;
+}
+
+/* Custom style for action column cell content alignment (Kept as is) */
+.ag-cell-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    padding-right: 1rem !important;
+}
+
+/* ----------------------------------------------------
+    UTILITIES (no change)
+----------------------------------------------------- */
+@layer utilities {
+
+  .divider { @apply h-px bg-[rgb(229_231_235)] my-4; }
+  .shadow-soft { @apply shadow-[0_1px_3px_rgba(0,0,0,0.06)]; }
+  .shadow-medium { @apply shadow-[0_4px_6px_rgba(0,0,0,0.1)]; }
+}
