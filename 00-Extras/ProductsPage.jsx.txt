@@ -1,0 +1,712 @@
+// src/pages/ProductsPage.jsx
+
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom'; // Import useNavigate
+import { useProducts } from '../contexts/ProductContext';
+import { useLookups } from '../contexts/LookupContext';
+// Remove modal imports
+// import BulkImportModal from '../components/BulkImportModal.jsx';
+// import NewLookupModal from '../components/NewLookupModal.jsx';
+// Keep export libraries
+import * as XLSX from 'xlsx';
+import { jsPDF } from 'jspdf';
+import { autoTable } from 'jspdf-autotable'; // Import the autoTable plugin
+
+import { AgGridReact } from 'ag-grid-react';
+import 'ag-grid-community/styles/ag-grid.css'; // Core grid CSS
+import 'ag-grid-community/styles/ag-theme-alpine.css'; // One of the built-in themes (Alpine)
+
+// Available fields for filtering (Uses PLURAL keys for lookup retrieval)
+const FILTERABLE_FIELDS = [
+  { key: 'brands', label: 'Brand', type: 'lookup' },
+  { key: 'categories', label: 'Category', type: 'lookup' },
+];
+
+// Utility function to map plural filter keys to singular product keys
+const getProductKeyFromFilterKey = (filterKey) => {
+  if (filterKey === 'brands') return 'brand';
+  if (filterKey === 'categories') return 'category';
+  return filterKey;
+};
+
+// - START: Icon Placeholders for better visualization -
+const EditIcon = ({ className = "w-4 h-4" }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+  </svg>
+);
+
+const DeleteIcon = ({ className = "w-4 h-4" }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+  </svg>
+);
+
+const OdooSearchBar = ({ lookups, searchText, setSearchText, activeFilters, onFilterToggle, onFilterRemove, categorizedFilterOptions }) => {
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const searchRef = useRef(null);
+  const inputRef = useRef(null);
+
+  const handleMenuClick = (filterOption) => {
+    const existingFilter = activeFilters.find(f => f.key === filterOption.key && f.value === filterOption.value);
+    if (!existingFilter) {
+      onFilterToggle(filterOption);
+    }
+    if (inputRef.current) {
+      inputRef.current.focus();
+    }
+  };
+
+  // Handle clicks outside the component to close the menu
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (searchRef.current && !searchRef.current.contains(event.target)) {
+        setIsMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [searchRef]);
+
+  return (
+    <div className="relative w-full" ref={searchRef}>
+      {/* 1. Active Filter Tags - DEEPER BLUE (No change needed inside dark card) */}
+      <div className="flex flex-wrap gap-2 mb-2">
+        {activeFilters.map((filter, index) => (
+          <span
+            key={index}
+            className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800"
+          >
+            {filter.label}
+            <button
+              type="button"
+              className="flex-shrink-0 ml-1.5 h-4 w-4 rounded-full inline-flex items-center justify-center text-indigo-400 hover:bg-indigo-200 hover:text-indigo-500 focus:outline-none focus:bg-indigo-500 focus:text-white"
+              onClick={() => onFilterRemove(filter)}
+            >
+              <span className="sr-only">Remove filter</span>
+              <svg className="h-2 w-2" stroke="currentColor" fill="none" viewBox="0 0 8 8">
+                <path strokeLinecap="round" strokeWidth="1.5" d="M1 1l6 6m0-6L1 7" />
+              </svg>
+            </button>
+          </span>
+        ))}
+      </div>
+
+      {/* 2. Search Input */}
+      <div className="relative rounded-md shadow-sm">
+        <input
+          type="text"
+          ref={inputRef}
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          onFocus={() => setIsMenuOpen(true)}
+          placeholder="Search SKU, Model, Brand, Category..."
+          className="input-base" // Apply themed input class
+        />
+        <div className="absolute inset-y-0 right-0 flex items-center pr-3">
+          <svg className="h-5 w-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
+          </svg>
+        </div>
+      </div>
+
+      {/* 3. Filter Dropdown Menu */}
+      {isMenuOpen && (
+        <div className="absolute z-10 mt-1 w-full rounded-md bg-white shadow-lg overflow-hidden">
+          <div className="max-h-60 overflow-y-auto">
+            {categorizedFilterOptions.filter(group => group.options.length > 0).length > 0 ? (
+              categorizedFilterOptions.map(group => (
+                group.options.length > 0 && (
+                  <div key={group.key} className="border-b border-gray-100 pb-3 last:border-b-0">
+                    <h3 className="text-xs font-bold uppercase text-indigo-700 mb-2 px-4">{group.label} Filters ({group.options.length})</h3>
+                    <div className="flex flex-wrap gap-2 px-4">
+                      {group.options.map((filterOption, index) => {
+                        const isActive = activeFilters.some(f => f.key === filterOption.key && f.value === filterOption.value);
+                        return (
+                          <button
+                            key={index}
+                            type="button"
+                            onClick={() => handleMenuClick(filterOption)}
+                            className={`px-3 py-1 text-sm rounded-full ${
+                              isActive
+                                ? 'bg-indigo-600 text-white'
+                                : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
+                            }`}
+                          >
+                            {filterOption.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )
+              ))
+            ) : (
+              <div className="py-2 px-4 text-sm text-gray-500">No filters available.</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+
+// - MAIN PAGE COMPONENT (Updated) -
+const ProductsPage = () => {
+  const navigate = useNavigate(); // Get the navigate function
+  const { products, isLoading, deleteProduct, isOnline } = useProducts();
+  const { lookups } = useLookups();
+  const [searchText, setSearchText] = useState('');
+  const [activeFilters, setActiveFilters] = useState([]);
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+  // NEW: State for sorting
+  const [sortBy, setSortBy] = useState('sku'); // Default sort key
+  const [sortDirection, setSortDirection] = useState('asc'); // 'asc' or 'desc'
+  /// NEW: State for pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const [productsPerPage, setProductsPerPage] = useState(25); // Now state variable
+  
+  // Options for the user to select page size
+  const pageSizeOptions = [10, 25, 50, 100];
+
+  // Function to toggle the export menu
+  const toggleExportMenu = () => {
+    setIsExportMenuOpen(prev => !prev); // Toggle the state
+  };
+
+  // Function to close the export menu (used by menu items and potentially a click outside handler)
+  const closeExportMenu = () => {
+    setIsExportMenuOpen(false);
+  };
+  // - START: EXPORT LOGIC (KEPT AS IS) -
+  const exportToExcel = () => {
+    if (!filteredProducts.length) {
+      alert("No products to export in the current view.");
+      return;
+    }
+
+    const worksheetData = filteredProducts.map(p => ({
+      SKU: p.sku,
+      Model: p.model || "",
+      Brand: p.brand || "",
+      Category: p.category || "",
+      Description: p.description || "", // Assuming description exists in product object
+      ReorderPoint: p.reorderPoint || 0,
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(worksheetData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Current_View_Products");
+    XLSX.writeFile(wb, "products_export.xlsx");
+  };
+
+  // NEW: Export current filteredProducts as PDF (Standard Download)
+  const exportToPdf = () => {
+    if (!filteredProducts.length) {
+      alert("No products to export in the current view.");
+      return;
+    }
+
+    const doc = new jsPDF();
+    doc.setFontSize(16);
+    doc.text("Products Export (Current View)", 14, 20);
+    doc.setFontSize(10);
+    doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 28);
+
+    autoTable(doc, {
+      head: [["SKU", "Model", "Brand", "Category", "Description", "Reorder Point"]],
+      body: filteredProducts.map(p => [
+        p.sku,
+        p.model || "",
+        p.brand || "",
+        p.category || "",
+        p.description || "",
+        p.reorderPoint || 0
+      ]),
+      startY: 36,
+      theme: "grid",
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [33, 150, 243] },
+    });
+
+    doc.save("products_export.pdf");
+  };
+   // NEW: Unified export handler (THIS WAS MISSING)
+  const handleExport = (format) => {
+    if (format === 'excel') {
+      exportToExcel();
+      alert("Excel file exported successfully to your default download folder!"); // Confirmation for Excel
+    } else if (format === 'pdf') {
+      exportToPdf();
+      alert("PDF file exported successfully to your default download folder!");
+      
+    }
+    // Close the menu after exporting (good UX)
+    setIsExportMenuOpen(false);
+  };
+  // --- END: EXPORT LOGIC ---
+  // - END: EXPORT LOGIC (KEPT AS IS) -
+
+  // - START: FILTERING LOGIC (KEPT AS IS) -
+  /*** Memoized list of products filtered by search text and active filters.*/
+  const filteredProducts = useMemo(() => {
+    let currentProducts = products;
+
+    // 1. Apply text search (SKU, Model, Brand, Category, Description) - MATCHES ANY WORD AGAINST ANY COLUMN
+    if (searchText) {
+      // Split the search text into individual terms using one or more spaces as the delimiter
+      const searchTerms = searchText.toLowerCase().split(/\s+/).filter(term => term.length > 0); 
+
+      if (searchTerms.length > 0) { 
+        currentProducts = currentProducts.filter(product => {
+          return searchTerms.every(term => {
+            const searchableText = [
+              product.sku,
+              product.model,
+              product.brand,
+              product.category,
+              product.description 
+            ]
+            .filter(field => field) 
+            .join(' ') 
+            .toLowerCase(); 
+
+            return searchableText.includes(term);
+          });
+        });
+      }
+    }
+
+    // 2. Apply active filters (UPDATED: OR within group, AND between groups)
+    if (activeFilters.length > 0) {
+      const groupedFilters = activeFilters.reduce((acc, filter) => {
+        if (!acc[filter.key]) {
+          acc[filter.key] = [];
+        }
+        acc[filter.key].push(filter.value);
+        return acc;
+      }, {});
+
+      const filterKeys = Object.keys(groupedFilters);
+      
+      currentProducts = currentProducts.filter(product => {
+        return filterKeys.every(filterKey => {
+          const productKey = getProductKeyFromFilterKey(filterKey); 
+          const allowedValues = groupedFilters[filterKey]; 
+
+          return allowedValues.includes(product[productKey]);
+        });
+      });
+    }
+    // 3. Apply Sorting Logic
+    currentProducts.sort((a, b) => {
+        const aValue = (a[sortBy] || '').toString().toLowerCase();
+        const bValue = (b[sortBy] || '').toString().toLowerCase();
+
+        if (aValue < bValue) {
+            return sortDirection === 'asc' ? -1 : 1;
+        }
+        if (aValue > bValue) {
+            return sortDirection === 'asc' ? 1 : -1;
+        }
+        return 0;
+    });
+
+    // Note: You may want to add sorting logic here if needed
+    return currentProducts;
+  }, [products, searchText, activeFilters, sortBy, sortDirection]); // Ensure dependencies are correct
+
+
+  // NEW: Memoized data for the CURRENT PAGE ONLY
+  const currentProducts = useMemo(() => {
+    const indexOfLastProduct = currentPage * productsPerPage;
+    const indexOfFirstProduct = indexOfLastProduct - productsPerPage;
+    return filteredProducts.slice(indexOfFirstProduct, indexOfLastProduct);
+  }, [filteredProducts, currentPage, productsPerPage]);
+
+  // Calculate total pages
+  const totalPages = Math.ceil(filteredProducts.length / productsPerPage);
+
+  // Handler to change page
+  const handlePageChange = (pageNumber) => {
+    setCurrentPage(pageNumber);
+  };
+  /** Handler to change the number of products displayed per page. */
+  const handlePageSizeChange = (event) => {
+    setProductsPerPage(Number(event.target.value));
+    setCurrentPage(1); // Reset to the first page when page size changes
+  };
+
+  /*** Toggles a filter on/off. Used by the OdooSearchBar dropdown.*/
+  const handleFilterToggle = (filter) => {
+    setActiveFilters(prev => {
+      const exists = prev.some(f => f.key === filter.key && f.value === filter.value);
+      if (exists) {
+        // Remove the filter if it already exists
+        return prev.filter(f => !(f.key === filter.key && f.value === filter.value));
+      } else {
+        // Add the new filter
+        return [...prev, filter];
+      }
+    });
+  };
+
+  /*** Removes a filter. Used by the active filter tags above the search bar.*/
+  const handleFilterRemove = (filterToRemove) => {
+    setActiveFilters(prev => prev.filter(f => !(f.key === filterToRemove.key && f.value === filterToRemove.value)));
+  };
+  // - END: FILTERING LOGIC (KEPT AS IS) -
+
+  // Categorize filter options for the search bar
+  const categorizedFilterOptions = useMemo(() => {
+    if (!lookups || Object.keys(lookups).length === 0) return [];
+
+    return FILTERABLE_FIELDS.map(field => {
+      const lookupItems = lookups[field.key] || [];
+      return {
+        key: field.key,
+        label: field.label,
+        options: lookupItems.map(value => ({
+          key: field.key,
+          label: value,
+          value: value,
+        })),
+      };
+    });
+  }, [lookups]);
+
+  // ... after handleFilterRemove ...
+
+  //** Handles clicking a table header to sort by that column. */
+  const handleSort = (key) => {
+      // If clicking the currently active column, reverse direction. Otherwise, default to ascending.
+      if (sortBy === key) {
+        setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
+      } else {
+        setSortBy(key);
+        setSortDirection('asc');
+      }
+      // Ensure page resets when sorting changes
+      setCurrentPage(1); 
+  };
+
+  // Categorize filter options for the search bar (Continue with existing function)
+// ...
+
+  // - START: DELETE LOGIC (ADAPTED) -
+  const handleDeleteProduct = async (productId, sku) => {
+    if (!isOnline) {
+      alert('Cannot delete product in Offline Mode. Please connect to the internet.');
+      return;
+    }
+    if (window.confirm(`Are you sure you want to delete SKU: ${sku}? This action is permanent.`)) {
+      try {
+        await deleteProduct(productId); // Use context function
+      } catch (error) {
+        // If deletion fails (e.g., Firestore error), alert the user
+        alert(`Failed to delete product: ${error.message}`);
+        console.error("Deletion Error:", error);
+      }
+    }
+  };
+  // - END: DELETE LOGIC (ADAPTED) -
+
+  // Determine if mutation buttons should be disabled
+  const isMutationDisabled = !isOnline;
+  const disabledClass = 'opacity-50 cursor-not-allowed'; // Themed class can be applied via btn classes
+
+  if (isLoading) {
+    return <div className="p-8 text-xl text-center">Loading Products...</div>;
+  }
+
+  return (
+    <div className="p-4 bg-gray-100 min-h-screen">
+      <h1 className="text-3xl font-bold mb-6 text-gray-800">Product Management</h1>
+
+      {/* Action Buttons (Navigation) - Apply themed buttons */}
+      <div className="flex flex-wrap gap-2 mb-6">
+        <button
+          onClick={() => navigate('/products/add')} // Navigate to Add Product form
+          className="btn btn-primary" // Use themed button
+          disabled={isMutationDisabled}
+        >
+          Add Product
+        </button>
+        <button
+          onClick={() => navigate('/products/bulk-import')} // Navigate to Bulk Import form
+          className="btn btn-secondary" // Use themed button
+          disabled={isMutationDisabled}
+        >
+          Bulk Import
+        </button>
+
+        {/* NEW: Export Button with Click-Triggered Dropdown */}
+        {/* Wrap the button and menu in a relative container */}
+        <div className="relative inline-block text-left">
+        {/* Main Export Button */}
+        <button
+          type="button"
+          className="btn btn-secondary" // Use themed button class (secondary as requested)
+          aria-haspopup="true"
+          aria-expanded={isExportMenuOpen} // Reflect state for accessibility
+          title="Toggle Export Options"
+          onClick={() => setIsExportMenuOpen(prev => !prev)} // Toggle menu on click
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+          </svg>
+          Export
+        </button>
+        {/* Dropdown Menu - Positioned absolutely relative to the container */}
+        {/* Show based on isExportMenuOpen state */}
+        {/* Add z-index to ensure it appears above other elements */}
+        {/* Add shadow and border for visual distinction */}
+        <div
+          id="export-dropdown-menu" // Give it an ID for potential external closing logic
+          className={`absolute right-0 mt-1 w-48 z-10 transition-opacity duration-100 ${
+            isExportMenuOpen ? 'opacity-100 visible' : 'opacity-0 invisible'
+          }`}
+        >
+          {/* Use a list for semantic structure */}
+          <ul role="none" className="py-1">
+            {/* Export to PDF Option - Default */}
+            <li>
+              {/* Apply themed button style to the menu item */}
+              <button
+                onClick={() => handleExport('pdf')} // Execute export and close menu via handleExport
+                className="btn btn-outline-primary w-full text-left px-4 py-2 text-sm" // Use themed button class (outline secondary), full width, text left aligned, specific padding/size
+                role="menuitem"
+              >
+                Export as PDF (.pdf)
+              </button>
+            </li>
+            {/* Export to Excel Option */}
+            <li>
+              {/* Apply themed button style to the menu item */}
+              <button
+                onClick={() => handleExport('excel')} // Execute export and close menu via handleExport
+                className="btn btn-outline-primary w-full text-left px-4 py-2 text-sm" // Use themed button class (outline secondary), full width, text left aligned, specific padding/size
+                role="menuitem"
+              >
+                Export as Excel (.xlsx)
+              </button>
+            </li>
+          </ul>
+        </div>
+      </div>
+      {/* End of NEW: Export Button with Click-Triggered Dropdown */}
+
+      {/* ... (rest of the page JSX remains the same) ... */}
+    </div>
+
+
+
+
+
+      {/* Search and Filter Bar - Apply themed input inside OdooSearchBar */}
+      <div className="mb-6 card"> {/* Apply themed card style */}
+        <OdooSearchBar
+          lookups={lookups}
+          searchText={searchText}
+          setSearchText={setSearchText}
+          activeFilters={activeFilters}
+          onFilterToggle={handleFilterToggle}
+          onFilterRemove={handleFilterRemove}
+          categorizedFilterOptions={categorizedFilterOptions}
+        />
+      </div>
+
+
+
+      <div className="bg-white shadow overflow-hidden rounded-lg">
+        <table className="table-base">
+            <thead className="bg-gray-50 sticky top-0 z-50 shadow-sm"><tr>
+                {['sku', 'model', 'brand', 'category'].map(key => {
+                    const label = key.charAt(0).toUpperCase() + key.slice(1);
+                    // Use 'w-auto' for main columns to allow expansion
+                    const thClasses = "px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 whitespace-nowrap w-auto"; 
+                    return (
+                        <th 
+                            key={key} 
+                            onClick={() => handleSort(key)} 
+                            className={thClasses}
+                        >
+                            <span className="flex items-center">
+                                {label}
+                                {/* Indication that the column is currently sorted */}
+                                {sortBy === key && (
+                                    <span className="ml-1 text-indigo-600">
+                                        {sortDirection === 'asc' ? '▲' : '▼'}
+                                    </span>
+                                )}
+                                {/* Indication that the column is sortable (subtle gray icon) */}
+                                {sortBy !== key && (
+                                    <span className="ml-1 text-gray-300 opacity-60">
+                                        {/* Up/Down Arrow Icon */}
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 9l4-4 4 4m0 6l-4 4-4-4" /></svg>
+                                    </span>
+                                )}
+                            </span>
+                        </th>
+                    );
+                })}
+                {/* Static/Non-sortable headers - Use fixed width classes or default behavior for these */}
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap w-4/12">Description</th> 
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Reorder Point</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap w-px">Actions</th></tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+            {filteredProducts.map((product) => (
+                <tr key={product.id || product.sku} className="hover:bg-gray-50">
+                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{product.sku}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{product.model}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{product.brand}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{product.category}</td>
+                <td className="px-6 py-4 text-sm text-gray-500">
+                    {product.description ? 
+                      (product.description.length > 20 ? 
+                        product.description.substring(0, 20) + '...' : 
+                        product.description) 
+                      : ''}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${product.reorderPoint > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                    {product.reorderPoint}
+                    </span>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                    <button
+                    onClick={() => navigate(`/products/edit/${product.id}`)}
+                    className={`text-indigo-600 hover:text-indigo-900 mr-2 ${isMutationDisabled ? disabledClass : ''}`}
+                    disabled={isMutationDisabled}
+                    >
+                    <EditIcon />
+                    </button>
+                    <button
+                    onClick={() => handleDeleteProduct(product.id, product.sku)}
+                    className={`text-red-600 hover:text-red-900 ${isMutationDisabled ? disabledClass : ''}`}
+                    disabled={isMutationDisabled}
+                    >
+                    <DeleteIcon />
+                    </button>
+                </td>
+                </tr>
+            ))}
+            {!isLoading && products.length > 0 && filteredProducts.length === 0 && (
+                <tr>
+                <td colSpan="7" className="px-6 py-4 text-center text-gray-500">No products match your current search/filters.</td>
+                </tr>
+            )}
+            </tbody>
+        </table>
+        {/* NEW: Pagination Control */}
+        {filteredProducts.length > productsPerPage && (
+            <div className="flex justify-between items-center px-4 py-3 bg-gray-50 border-t border-gray-200 sm:px-6">
+                <div className="flex-1 flex justify-between sm:hidden">
+                    <button
+                        onClick={() => handlePageChange(currentPage - 1)}
+                        disabled={currentPage === 1}
+                        className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-100"
+                    >
+                        Previous
+                    </button>
+                    <button
+                        onClick={() => handlePageChange(currentPage + 1)}
+                        disabled={currentPage === totalPages}
+                        className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-100"
+                    >
+                        Next
+                    </button>
+                </div>
+                <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                    <div>
+                        {/* START: NEW PAGINATION INFO BLOCK */}
+                        <p className="text-sm text-gray-700">
+                            Showing <span className="font-medium">{(currentPage - 1) * productsPerPage + 1}</span> to <span className="font-medium">{Math.min(currentPage * productsPerPage, filteredProducts.length)}</span> of <span className="font-medium">{filteredProducts.length}</span> results
+                        </p>
+                        <div className="mt-2 flex items-center">
+                            <label htmlFor="productsPerPage" className="text-sm text-gray-700 mr-2">
+                                Products per page:
+                            </label>
+                            <select
+                                id="productsPerPage"
+                                value={productsPerPage}
+                                onChange={handlePageSizeChange}
+                                className="mt-1 block pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
+                            >
+                                {pageSizeOptions.map(option => (
+                                    <option key={option} value={option}>
+                                        {option}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                        {/* END: NEW PAGINATION INFO BLOCK */}
+                    </div>
+                    <div>
+                        <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                            <button
+                                onClick={() => handlePageChange(currentPage - 1)}
+                                disabled={currentPage === 1}
+                                className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <span className="sr-only">Previous</span>
+                                {/* Left Chevron Icon */}
+                                <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                            </button>
+
+                            {/* Simple Page Numbers (showing current, prev, and next pages) */}
+                            {[...Array(totalPages)].map((_, index) => {
+                                const pageNumber = index + 1;
+                                const isCurrent = pageNumber === currentPage;
+                                return (
+                                    <button
+                                        key={pageNumber}
+                                        onClick={() => handlePageChange(pageNumber)}
+                                        aria-current={isCurrent ? 'page' : undefined}
+                                        className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${
+                                            isCurrent
+                                                ? 'z-10 bg-indigo-50 border-indigo-500 text-indigo-600'
+                                                : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
+                                        }`}
+                                    >
+                                        {pageNumber}
+                                    </button>
+                                );
+                            })}
+                            
+                            <button
+                                onClick={() => handlePageChange(currentPage + 1)}
+                                disabled={currentPage === totalPages}
+                                className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <span className="sr-only">Next</span>
+                                {/* Right Chevron Icon */}
+                                <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" /></svg>
+                            </button>
+                        </nav>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {products.length === 0 && (
+            <p className="p-6 text-center text-gray-500">No products found. Add some products to get started.</p>
+        )}
+    </div>
+
+
+
+      {/* Removed Modals */}
+      {/* <ProductModal ... /> */}
+      {/* <BulkImportModal ... /> */}
+      {/* <NewLookupModal ... /> */}
+
+    </div>
+  );
+};
+
+export default ProductsPage;

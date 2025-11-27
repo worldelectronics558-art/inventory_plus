@@ -1,0 +1,18 @@
+lets discuss, how we will handle transactions logs and multi user. I want every operation by every ser saved in a form of Logs, for auditing and error checking. every log should have user reference and type of operation and related product reference ion which operation was performed. 
+
+
+
+📱 Future Android App Considerations
+For the future Android version, the approach is similar but uses platform-native secure storage mechanisms.
+
+Storage Tool: Use Android Keystore (for keys) and SharedPreferences or a local SQLite Database (for data), ensuring the data itself is protected by a key stored in the Keystore.
+
+Tauri Mobile (Optional): If you decide to use Tauri Mobile for Android, you would use the same Tauri FS APIs as the desktop app, as Tauri abstracts the underlying storage mechanisms.
+
+Limited Features: Since the Android app will be read-only, offline functionality is easier. Once a user successfully logs in online, you can:
+
+Store the Authentication Token securely.
+
+Cache the necessary read-only data (e.g., product lists, user profile) locally in SQLite.
+
+When offline, only check the local token for validity and present the cached data.
