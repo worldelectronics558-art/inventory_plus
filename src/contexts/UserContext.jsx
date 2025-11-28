@@ -1,147 +1,137 @@
 // src/contexts/UserContext.jsx
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { useAuth } from './AuthContext.jsx'; 
-import { doc, onSnapshot, setDoc } from 'firebase/firestore'; 
+import { useAuth } from './AuthContext';
+import { doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 
-// --- CONSTANTS AND UTILITY FUNCTIONS (Defined First) ---
-const DEFAULT_PERMISSIONS = {
-    isAuthenticated: false,
-    canManageProducts: false,
-    canManageInventory: false,
-    role: 'anonymous',
+// 1. Permission Calculation Logic
+const calculatePermissions = (role, isAuthenticated) => {
+    if (!isAuthenticated) {
+        return {
+            role: 'guest',
+            canViewInventory: false,
+            canManageInventory: false,
+            canManageUsers: false,
+            canViewProducts: false, // Explicitly false for guests
+            canManageProducts: false,
+            canViewSettings: false,
+        };
+    }
+    // CORRECTED: Added both canViewProducts and canManageProducts
+    const permissions = {
+        admin: {
+            canViewInventory: true,
+            canManageInventory: true,
+            canManageUsers: true,
+            canViewProducts: true,    // Can see the page
+            canManageProducts: true, // Can edit/add products
+            canViewSettings: true,
+        },
+        manager: {
+            canViewInventory: true,
+            canManageInventory: true,
+            canManageUsers: false,
+            canViewProducts: true,    // Can see the page
+            canManageProducts: true, // Can edit/add products
+            canViewSettings: true,
+        },
+        viewer: {
+            canViewInventory: true,
+            canManageInventory: false,
+            canManageUsers: false,
+            canViewProducts: true,    // Can see the page
+            canManageProducts: false, // CANNOT edit/add products
+            canViewSettings: false,
+        },
+    };
+    return { role, ...(permissions[role] || permissions.viewer) };
 };
 
-const calculatePermissions = (role, isAuth) => {
-    if (!isAuth) {
-        return DEFAULT_PERMISSIONS;
-    }
-
-    switch (role) {
-        case 'admin':
-            return {
-                isAuthenticated: true,
-                canManageProducts: true,
-                canManageInventory: true,
-                role: 'admin',
-            };
-        case 'manager':
-            return {
-                isAuthenticated: true,
-                canManageProducts: false,
-                canManageInventory: true,
-                role: 'manager',
-            };
-        case 'viewer':
-        default:
-            return {
-                isAuthenticated: true,
-                canManageProducts: false,
-                canManageInventory: false,
-                role: role || 'viewer',
-            };
-    }
-};
-// --------------------------------------------------------
-
+// 2. Context Definition
 const UserContext = createContext({
     currentUser: null,
-    
-    userPermissions: DEFAULT_PERMISSIONS,
-    
-    isLoading: true, 
-    
-    appId: typeof __app_id !== 'undefined' ? __app_id : 'default-app-id',
+    userPermissions: calculatePermissions('guest', false),
+    assignedLocations: [],
+    isLoading: true,
+    appId: null,
 });
 
 export const useUser = () => useContext(UserContext);
 
+// 3. Provider Component
 export const UserProvider = ({ children }) => {
-    // Note: isOnline is NOT pulled here as profile data fetching is essential for both modes.
-    const { userId, isAuthenticated, authReady, db } = useAuth(); 
-    
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
+    const { userId, isAuthenticated, auth, db, appId, authReady } = useAuth();
     const [currentUser, setCurrentUser] = useState(null);
-    const [userPermissions, setUserPermissions] = useState(DEFAULT_PERMISSIONS);
+    const [userPermissions, setUserPermissions] = useState(calculatePermissions('guest', false));
+    const [assignedLocations, setAssignedLocations] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
-        let unsubscribe = () => {};
-        
-        if (!authReady || !db) {
-            setIsLoading(true); 
+        if (!authReady) {
+            setIsLoading(true);
             return;
         }
 
-        // If not authenticated (either live or offline), clear state and stop loading
-        if (!isAuthenticated) { 
-            console.log("USER CONTEXT: Unauthenticated. Setting loading=false to show login screen.");
+        if (!isAuthenticated || !userId || !db || !appId) {
             setCurrentUser(null);
-            setUserPermissions(DEFAULT_PERMISSIONS);
-            setIsLoading(false); 
+            setUserPermissions(calculatePermissions('guest', false));
+            setAssignedLocations([]);
+            setIsLoading(false);
             return;
         }
-        
-        console.log(`USER CONTEXT: Fetching user profile for UID: ${userId}`);
 
-        const userDocRef = doc(db, 'artifacts', appId, 'users', userId, 'profile', 'data');
+        const userDocRef = doc(db, 'artifacts', appId, 'users', userId);
 
-        unsubscribe = onSnapshot(userDocRef, async (docSnap) => { 
+        const unsubscribe = onSnapshot(userDocRef, async (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
-                const role = data.role || 'viewer'; 
+                const role = data.role || 'viewer';
                 
                 setCurrentUser(data);
                 setUserPermissions(calculatePermissions(role, isAuthenticated));
-                
-                console.log(`USER CONTEXT: Profile loaded. Role: ${role}`);
-            } else {
-                // --- CRITICAL FIX: Create the default 'admin' profile here ---
-                console.log("USER CONTEXT: Profile not found. Creating default 'admin' role.");
-                
-                const defaultProfile = { 
-                    role: 'admin',
-                    createdAt: new Date(),
-                    lastLogin: new Date(),
-                };
-                
-                try {
-                    await setDoc(userDocRef, defaultProfile); 
-                    console.log("USER CONTEXT: Default 'admin' profile created successfully.");
-                } catch (error) {
-                    console.error("USER CONTEXT: Failed to create default profile:", error);
-                    setCurrentUser({ role: 'admin' }); 
-                    setUserPermissions(calculatePermissions('admin', isAuthenticated));
-                    setIsLoading(false);
+                setAssignedLocations(data.assignedLocations || []);
+
+                if (data.lastLogin?.toDate()?.getTime() < Date.now() - 60000) {
+                    try {
+                        await updateDoc(userDocRef, { lastLogin: new Date() });
+                    } catch (error) {
+                        console.warn("USER CONTEXT: Failed to update lastLogin:", error.message);
+                    }
                 }
-                return; 
+            } else {
+                const email = auth?.currentUser?.email;
+                if (email === 'worl@world.com') {
+                    const defaultProfile = { 
+                        displayName: 'Admin User',
+                        email: email,
+                        role: 'admin',
+                        createdAt: new Date(),
+                        lastLogin: new Date(),
+                        assignedLocations: [],
+                    };
+                    
+                    try {
+                        await setDoc(userDocRef, defaultProfile);
+                    } catch (error) {
+                        console.error("USER CONTEXT: Failed to create default admin profile:", error);
+                        setCurrentUser({ role: 'admin', assignedLocations: [] }); 
+                        setUserPermissions(calculatePermissions('admin', isAuthenticated));
+                        setAssignedLocations([]);
+                    }
+                }
             }
-            
-            setIsLoading(false); 
+            setIsLoading(false);
         }, (error) => {
-            console.error("USER CONTEXT: Error fetching user profile:", error);
-            setCurrentUser(null);
-            setUserPermissions(DEFAULT_PERMISSIONS);
-            setIsLoading(false); 
+            console.error("USER CONTEXT: Snapshot listener error:", error);
+            setIsLoading(false);
         });
 
-        return () => {
-            console.log("USER CONTEXT: Cleaning up listener.");
-            unsubscribe();
-        };
+        return () => unsubscribe();
 
-    }, [authReady, db, userId, isAuthenticated, appId]);
-
-    const contextValue = {
-        currentUser,
-        userPermissions,
-        isLoading,
-        appId,
-    };
+    }, [userId, isAuthenticated, db, appId, authReady, auth]);
 
     return (
-        <UserContext.Provider value={contextValue}>
+        <UserContext.Provider value={{ currentUser, userPermissions, assignedLocations, isLoading, appId }}>
             {children}
         </UserContext.Provider>
     );

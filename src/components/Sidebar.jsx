@@ -9,15 +9,13 @@ import { useUser } from '../contexts/UserContext.jsx';
 
 // --- ICONS ---
 import { Cloud, CloudOff, LayoutDashboard, Package, Warehouse, Users, Settings, LogOut, X } from 'lucide-react'; 
-// NOTE: ChevronLeft removed as the toggle button is now in the Header
 // --- END: ICONS ---
 
-// Data structure for navigation items
+// Updated Data structure for navigation items
 const navItems = [
     { name: 'Dashboard', icon: LayoutDashboard, route: '/' },
-    { name: 'Products', icon: Package, route: '/products', permission: 'canManageProducts' },
-    { name: 'Inventory', icon: Warehouse, route: '/inventory', permission: 'canManageInventory' },
-    { name: 'Users', icon: Users, route: '/users', permission: 'canManageUsers' }, 
+    { name: 'Products', icon: Package, route: '/products', permission: 'canViewProducts' }, // Changed to canViewProducts
+    { name: 'Inventory', icon: Warehouse, route: '/inventory', permission: 'canViewInventory' }, // Changed to canViewInventory
     { name: 'Settings', icon: Settings, route: '/settings' },
 ];
 
@@ -33,11 +31,9 @@ const Sidebar = ({ isCollapsed, toggleSidebar }) => {
     const location = useLocation();
 
     // --- GET DATA FROM CONTEXTS ---
-    const { user: currentUser, userPermissions, assignedLocations: rawAssignedLocations } = useUser(); 
+    const { userPermissions } = useUser(); // Simplified to just get permissions
     const { isOnline, userId, goOnline, goOffline, signOut, isAuthenticated } = useAuth(); 
     // --- END: GET CONTEXT DATA ---
-
-    const assignedLocations = rawAssignedLocations || [];
 
     // --- STATE FOR RECONNECT FORM ---
     const [showReconnectForm, setShowReconnectForm] = useState(false);
@@ -56,11 +52,7 @@ const Sidebar = ({ isCollapsed, toggleSidebar }) => {
                 goOffline(); 
             }
         } else {
-            if (!isCollapsed) { 
-                setShowReconnectForm(true);
-            } else {
-                setShowReconnectForm(true); 
-            }
+            setShowReconnectForm(true);
             setReconnectError('');
         }
     };
@@ -94,10 +86,7 @@ const Sidebar = ({ isCollapsed, toggleSidebar }) => {
         const isActive = location.pathname === route ||
                          (route === '/' && location.pathname === '/dashboard');
 
-        // Preserve original classes, add collapse adjustments
         const baseClasses = `sidebar-link ${isActive ? 'active' : ''}`;
-        
-        // Add classes for centering/width when collapsed
         const collapseClasses = isCollapsed ? 'justify-center w-12 mx-auto' : 'w-full';
 
         return `${baseClasses} ${collapseClasses}`;
@@ -105,19 +94,14 @@ const Sidebar = ({ isCollapsed, toggleSidebar }) => {
     // --- END: LOGIC ---
 
     return (
-        // 1. Sidebar Container: Apply fixed position and change width based on state
         <div className={`fixed top-0 left-0 h-full z-20 bg-gray-900 shadow-xl flex flex-col transition-all duration-300 ${isCollapsed ? 'w-16' : 'w-64'} sidebar`}> 
             
-            {/* 2. Header / Title Section: Removed the toggle button */}
             <div className="flex items-center justify-start h-16 px-4 border-b border-gray-700 sidebar-header"> 
-                {/* Logo/Title */}
                 {isCollapsed ? (
-                    // COLLAPSED: Display the logo
                     <img 
-                        src="/src/assets/logo.svg" // Path provided by the user
+                        src="/src/assets/logo.svg"
                         alt="InventoryPlus Logo" 
                         className="w-8 h-8 rounded-full" 
-                        // Fallback to a placeholder icon
                         onError={(e) => {
                             e.target.onerror = null; 
                             e.target.style.backgroundColor = '#4f46e5'; 
@@ -126,39 +110,31 @@ const Sidebar = ({ isCollapsed, toggleSidebar }) => {
                         }}
                     />
                 ) : (
-                    // EXPANDED: Full Title
                     <h1 className="text-xl font-bold text-white whitespace-nowrap">InventoryPlus</h1>
                 )}
-                
-                {/* REMOVED: Collapse Button */}
             </div>
 
-            {/* 3. User Info Section - HIDE WHEN COLLAPSED - DELETED*/}
-            
-
-            {/* 4. Network Status BUTTON */}
-            <div className={`p-2 ${isCollapsed ? 'px-1' : ''}`}> {/* Adjust padding when collapsed */}
+            <div className={`p-2 ${isCollapsed ? 'px-1' : ''}`}>
                 <button
                     onClick={handleConnectionClick}
                     disabled={!isAuthenticated}
                     className={`flex items-center w-full py-3 text-sm rounded-lg transition-all duration-300 font-semibold text-white
                         ${isOnline ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}
                         ${!isAuthenticated ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-                        ${isCollapsed ? 'justify-center px-0' : 'justify-between px-4'}` // <-- COLLAPSE ADJUSTMENTS
+                        ${isCollapsed ? 'justify-center px-0' : 'justify-between px-4'}`
                     }
                 >
                     <div className="flex items-center">
                         {isOnline
                             ? <Cloud className="w-4 h-4" /> 
                             : <CloudOff className="w-4 h-4" />}
-                        {!isCollapsed && <span className='ml-2'>Status: {isOnline ? 'Online' : 'Offline'}</span>} {/* <-- HIDE TEXT */}
+                        {!isCollapsed && <span className='ml-2'>Status: {isOnline ? 'Online' : 'Offline'}</span>}
                     </div>
-                    {!isCollapsed && <div>{isOnline ? 'Go Offline' : 'Go Online'}</div>} {/* <-- HIDE TEXT */}
+                    {!isCollapsed && <div>{isOnline ? 'Go Offline' : 'Go Online'}</div>}
                 </button>
             </div>
 
-            {/* 5. INLINE RECONNECT FORM - HIDE COMPLETELY WHEN COLLAPSED */}
-            {showReconnectForm && !isOnline && !isCollapsed && ( // <-- CHECK isCollapsed
+            {showReconnectForm && !isOnline && !isCollapsed && (
                 <div className="mx-2 mb-2 p-3 bg-indigo-900/80 rounded-lg shadow-inner">
                     <div className="flex justify-between items-center mb-2">
                         <p className="text-sm font-semibold text-white">Connect to Server</p>
@@ -200,13 +176,14 @@ const Sidebar = ({ isCollapsed, toggleSidebar }) => {
                 </div>
             )}
 
-            {/* 6. Navigation Links */}
             <nav className="sidebar-nav grow p-2">
                 {navItems.map((item) => {
-                    if (item.permission && !userPermissions[item.permission]) {
+                    // Hide item if user is not authenticated and it's not the dashboard
+                    if (!isAuthenticated && item.route !== '/') {
                         return null;
                     }
-                    if (item.route !== '/' && !isAuthenticated) {
+                    // Hide item if a specific permission is required and the user doesn't have it
+                    if (item.permission && !userPermissions[item.permission]) {
                         return null;
                     }
 
@@ -216,13 +193,11 @@ const Sidebar = ({ isCollapsed, toggleSidebar }) => {
                         <button
                             key={item.route}
                             onClick={() => navigate(item.route)}
-                            className={`${navLinkClass(item.route)} mb-1 group relative`} // Added group/relative for tooltip
+                            className={`${navLinkClass(item.route)} mb-1 group relative`}
                         >
-                            {/* Icon placement adjustment */}
                             <Icon className={`w-5 h-5 ${!isCollapsed ? 'mr-3' : ''}`} /> 
-                            {!isCollapsed && <span>{item.name}</span>} {/* <-- HIDE TEXT */}
+                            {!isCollapsed && <span>{item.name}</span>}
 
-                            {/* Tooltip for collapsed state */}
                             {isCollapsed && (
                                 <span className="absolute left-full ml-4 whitespace-nowrap px-3 py-1 bg-gray-700 text-white text-sm rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-30">
                                     {item.name}
@@ -233,17 +208,15 @@ const Sidebar = ({ isCollapsed, toggleSidebar }) => {
                 })}
             </nav>
 
-            {/* 7. Footer Section (Sign Out) */}
             <div className={`sidebar-footer mt-auto p-2 ${isCollapsed ? 'px-1' : ''}`}>
                 {isAuthenticated ? ( 
                     <button
                         onClick={signOut}
-                        // Preserve original button classes. Change justification/padding for collapse.
                         className={`btn btn-danger w-full py-3 text-sm font-medium ${isCollapsed ? 'justify-center' : 'flex px-4'}`}
                     >
                         <LogOut className={`w-5 h-5 ${!isCollapsed ? 'mr-3' : ''}`} />
                         {!isCollapsed && <span>Sign Out</span>}
-                        {isCollapsed && ( // Tooltip for collapsed Sign Out
+                        {isCollapsed && ( 
                              <span className="absolute left-full ml-4 whitespace-nowrap px-3 py-1 bg-gray-700 text-white text-sm rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-30">
                                 Sign Out
                             </span>
