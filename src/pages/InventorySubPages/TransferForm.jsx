@@ -33,7 +33,7 @@ const getProductDisplayName = (product) => product ? `${product.sku} - ${product
 const customSelectStyles = {
     control: (provided, state) => ({
         ...provided,
-        backgroundColor: 'transparent',
+        backgroundColor: '#dff6f4', // secondary-50
         border: 'none',
         boxShadow: 'none', // Remove focus shadow
         minHeight: '38px',
@@ -56,6 +56,7 @@ const customSelectStyles = {
     menu: (provided) => ({
         ...provided,
         zIndex: 20, // Ensure dropdown appears over other elements
+        backgroundColor: '#dff6f4', // secondary-50
     }),
     menuPortal: (base) => ({ ...base, zIndex: 9999 })
 };
@@ -296,7 +297,7 @@ const TransferForm = () => {
                         <div className="border rounded-lg overflow-hidden">
                             <table className="table-base w-full">
                                 <thead className="bg-gray-50">
-                                    <tr>
+                                    <tr className="gap-2">
                                         <th className="th-base w-1/3">Model</th>
                                         <th className="th-base">From Location</th>
                                         <th className="th-base">To Location</th>

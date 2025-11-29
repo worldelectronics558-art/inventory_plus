@@ -33,29 +33,56 @@ const getProductDisplayName = (product) => product ? `${product.sku} - ${product
 const customSelectStyles = {
     control: (provided, state) => ({
         ...provided,
-        backgroundColor: 'transparent',
-        border: 'none',
-        boxShadow: 'none', // Remove focus shadow
-        minHeight: '38px',
+        width: '100%',
+        backgroundColor: '#F0FDF4', // bg-secondary-50
+        color: '#064E3B', // text-primary-900
+        border: state.isFocused ? '2px solid #059669' : '1px solid #CFD9E4',
+        borderRadius: '0.5rem',
+        padding: '0.3rem 0.25rem', // Roughly py-2.5 and px-3
+        boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+        minHeight: '42px',
+        transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+        '&:hover': {
+            borderColor: state.isFocused ? '#059669' : '#9CA3AF',
+        }
     }),
     valueContainer: (provided) => ({
         ...provided,
-        padding: '0 8px',
+        padding: '0 0.5rem',
     }),
     input: (provided) => ({
         ...provided,
         margin: '0px',
         padding: '0px',
+        color: '#064E3B',
     }),
-    indicatorSeparator: () => ({ display: 'none' }),
-    singleValue: (provided) => ({ // This removes the box around the selected value
+    placeholder: (provided) => ({
         ...provided,
-        backgroundColor: 'transparent',
-        color: 'inherit',
+        color: '#94A3B8', // placeholder:text-[rgb(148_163_184)]
+    }),
+    indicatorSeparator: () => ({ 
+        display: 'none', 
+    }),
+    singleValue: (provided) => ({
+        ...provided,
+        color: '#064E3B',
     }),
     menu: (provided) => ({
         ...provided,
-        zIndex: 20, // Ensure dropdown appears over other elements
+        zIndex: 20,
+        backgroundColor: '#F0FDF4', // bg-secondary-50
+        borderRadius: '0.5rem',
+        boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
+    }),
+    option: (provided, state) => ({
+        ...provided,
+        backgroundColor: state.isSelected ? '#059669' : state.isFocused ? '#D1FAE5' : 'transparent',
+        color: state.isSelected ? 'white' : '#064E3B',
+        padding: '0.5rem 1rem',
+        '&:hover': {
+            backgroundColor: state.isSelected ? '#059669' : '#D1FAE5',
+            color: state.isSelected ? 'white' : '#064E3B',
+        }
     }),
     menuPortal: (base) => ({ ...base, zIndex: 9999 })
 };
@@ -285,10 +312,10 @@ const StockOutForm = () => {
                             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows="2" className="input-base" />
                         </div>
                         <div className="border rounded-lg overflow-hidden">
-                            <table className="table-base w-full">
+                            <table className="table-base w-full" style={{borderCollapse: 'separate', borderSpacing: '0.5rem'}}>
                                 <thead className="bg-gray-50">
                                     <tr>
-                                        <th className="th-base w-2/5">Model</th>
+                                        <th className="th-base w-1/3">Model</th>
                                         <th className="th-base">Location</th>
                                         <th className="th-base">Current Qty</th>
                                         <th className="th-base">Quantity</th>
@@ -296,19 +323,19 @@ const StockOutForm = () => {
                                         <th className="th-base">Action</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y">
+                                <tbody>
                                     {items.map((item, index) => (
                                         <tr key={index}>
-                                            <td className="td-base"><Select styles={customSelectStyles} options={productOptions} value={item.sku} onChange={v => handleItemChange(index, 'sku', v)} placeholder="Select..." isClearable menuPortalTarget={document.body} /></td>
-                                            <td className="td-base">
+                                            <td className="p-1"><Select styles={customSelectStyles} options={productOptions} value={item.sku} onChange={v => handleItemChange(index, 'sku', v)} placeholder="Select..." isClearable menuPortalTarget={document.body} /></td>
+                                            <td className="p-1">
                                                 <div className="flex items-center">
                                                     <Select className="flex-grow" styles={customSelectStyles} options={locationOptions} value={item.location} onChange={v => handleItemChange(index, 'location', v)} placeholder="Select..." isClearable={false} menuPortalTarget={document.body} />
                                                     <button type="button" onClick={() => setAddLocationModalOpen(true)} className="btn btn-sm ml-1">+</button>
                                                 </div>
                                             </td>
                                             <td className="td-base text-center">{item.currentQty || 0}</td>
-                                            <td className="td-base"><input type="number" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', parseInt(e.target.value) || 0)} min="1" className="input-base w-full text-center" /></td>
-                                            <td className="td-base"><Select styles={customSelectStyles} options={reasonOptions} value={item.reason} onChange={v => handleItemChange(index, 'reason', v)} placeholder="Select..." menuPortalTarget={document.body} /></td>
+                                            <td className="p-1"><input type="number" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', parseInt(e.target.value) || 0)} min="1" className="input-base w-full text-center" /></td>
+                                            <td className="p-1"><Select styles={customSelectStyles} options={reasonOptions} value={item.reason} onChange={v => handleItemChange(index, 'reason', v)} placeholder="Select..." menuPortalTarget={document.body} /></td>
                                             <td className="td-base text-center"><button type="button" onClick={() => handleRemoveItem(index)} className="btn btn-outline-danger btn-sm">X</button></td>
                                         </tr>
                                     ))}

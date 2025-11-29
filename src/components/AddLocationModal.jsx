@@ -45,7 +45,7 @@ const AddLocationModal = ({ isOpen, onClose }) => {
 
     // The background is a div with a backdrop-blur effect
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-10 backdrop-blur-sm">
             <div className="relative bg-white rounded-lg shadow-xl w-full max-w-md m-4">
                 <div className="flex justify-between items-center p-4 border-b">
                     <h2 className="text-xl font-bold">Add New Location</h2>
