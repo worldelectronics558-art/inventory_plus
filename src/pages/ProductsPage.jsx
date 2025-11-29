@@ -7,28 +7,15 @@ import { useLookups } from '../contexts/LookupContext';
 // Export libraries
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
-import { autoTable } from 'jspdf-autotable'; 
+import 'jspdf-autotable';
 // AG Grid Imports
 import { AgGridReact } from 'ag-grid-react';
+import { ModuleRegistry, AllCommunityModules } from 'ag-grid-community';
 
-import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
-    
-    ModuleRegistry.registerModules([ AllCommunityModule ]);
-     
+ModuleRegistry.registerModules(AllCommunityModules);
 
-// Available fields for filtering (Uses PLURAL keys for lookup retrieval)
-const FILTERABLE_FIELDS = [
-  { key: 'brands', label: 'Brand', type: 'lookup' },
-  { key: 'categories', label: 'Category', type: 'lookup' },
-];
-// Utility function to map plural filter keys to singular product keys
-const getProductKeyFromFilterKey = (filterKey) => {
-  if (filterKey === 'brands') return 'brand';
-  if (filterKey === 'categories') return 'category';
-  return filterKey;
-};
 
-// --- START: Icon Placeholders (KEPT AS IS) ---
+// --- START: ICONS ---
 const EditIcon = ({ className = "w-4 h-4" }) => (
   <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -42,124 +29,86 @@ const DeleteIcon = ({ className = "w-4 h-4" }) => (
 const ViewIcon = ({ className = "w-4 h-4" }) => (
     <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
 );
-// --- END: Icon Placeholders ---
+const HistoryIcon = ({ className = "w-4 h-4" }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+);
+// --- END: ICONS ---
 
+const FILTERABLE_FIELDS = [
+  { key: 'brands', label: 'Brand', type: 'lookup' },
+  { key: 'categories', label: 'Category', type: 'lookup' },
+];
+const getProductKeyFromFilterKey = (filterKey) => {
+  if (filterKey === 'brands') return 'brand';
+  if (filterKey === 'categories') return 'category';
+  return filterKey;
+};
 
-// --- OdooSearchBar Component (KEPT AS IS) ---
-const OdooSearchBar = ({ lookups, searchText, setSearchText, activeFilters, onFilterToggle, onFilterRemove, categorizedFilterOptions }) => {
+const OdooSearchBar = ({ searchText, setSearchText, activeFilters, onFilterToggle, onFilterRemove, categorizedFilterOptions }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const searchRef = useRef(null);
   const inputRef = useRef(null);
 
   const handleMenuClick = (filterOption) => {
-    const existingFilter = activeFilters.find(f => f.key === filterOption.key && f.value === filterOption.value);
-    if (!existingFilter) {
+    if (!activeFilters.some(f => f.key === filterOption.key && f.value === filterOption.value)) {
       onFilterToggle(filterOption);
     }
-    if (inputRef.current) {
-      inputRef.current.focus();
-    }
+    if (inputRef.current) inputRef.current.focus();
   };
 
-  // Handle clicks outside the component to close the menu
   useEffect(() => {
-    function handleClickOutside(event) {
-      if (searchRef.current && !searchRef.current.contains(event.target)) {
-        setIsMenuOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
+    const handleClickOutside = (event) => {
+      if (searchRef.current && !searchRef.current.contains(event.target)) setIsMenuOpen(false);
     };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [searchRef]);
+
   return (
     <div className="relative w-full" ref={searchRef}>
-      {/* 1. Active Filter Tags */}
       <div className="flex flex-wrap gap-2 mb-2">
         {activeFilters.map((filter, index) => (
-          <span
-            key={index}
-            className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800"
-          >
+          <span key={index} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
             {filter.label}
-            <button
-              type="button"
-              className="shrink-0 ml-1.5 h-4 w-4 rounded-full inline-flex items-center justify-center text-indigo-400 hover:bg-indigo-200 hover:text-indigo-500 focus:outline-none focus:bg-indigo-500 focus:text-white"
-              onClick={() => onFilterRemove(filter)}
-            >
+            <button type="button" className="shrink-0 ml-1.5 h-4 w-4 rounded-full inline-flex items-center justify-center text-indigo-400 hover:bg-indigo-200 hover:text-indigo-500 focus:outline-none focus:bg-indigo-500 focus:text-white" onClick={() => onFilterRemove(filter)}>
               <span className="sr-only">Remove filter</span>
-              <svg className="h-2 w-2" stroke="currentColor" fill="none" viewBox="0 0 8 8">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M1 1l6 6m0-6L1 7" />
-              </svg>
+              <svg className="h-2 w-2" stroke="currentColor" fill="none" viewBox="0 0 8 8"><path strokeLinecap="round" strokeWidth="1.5" d="M1 1l6 6m0-6L1 7" /></svg>
             </button>
           </span>
         ))}
       </div>
-
-      {/* 2. Search Input */}
       <div className="relative rounded-md shadow-sm">
-        <input
-          type="text"
-          ref={inputRef}
-          value={searchText}
-          onChange={(e) => setSearchText(e.target.value)}
-          onFocus={() => setIsMenuOpen(true)}
-          placeholder="Search SKU, Model, Brand, Category..."
-          className="input-base" // Apply themed input class
-        />
+        <input type="text" ref={inputRef} value={searchText} onChange={(e) => setSearchText(e.target.value)} onFocus={() => setIsMenuOpen(true)} placeholder="Search SKU, Model, Brand, Category..." className="input-base" />
         <div className="absolute inset-y-0 right-0 flex items-center pr-3">
-          <svg className="h-5 w-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-          </svg>
+          <svg className="h-5 w-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" /></svg>
         </div>
       </div>
-
-      {/* 3. Filter Dropdown Menu */}
       {isMenuOpen && (
         <div className="absolute z-10 mt-1 w-full rounded-md bg-white shadow-lg overflow-hidden border border-gray-200">
           <div className="max-h-60 overflow-y-auto">
-            {categorizedFilterOptions.filter(group => group.options.length > 0).length > 0 ?
-            (
+            {categorizedFilterOptions.filter(g => g.options.length > 0).length > 0 ? (
               categorizedFilterOptions.map(group => (
                 group.options.length > 0 && (
                   <div key={group.key} className="border-b border-gray-100 py-3 last:border-b-0">
-                    <h3 className="text-xs font-bold uppercase text-indigo-700 mb-2 px-4">{group.label} Filters ({group.options.length})</h3>
+                    <h3 className="text-xs font-bold uppercase text-indigo-700 mb-2 px-4">{group.label} Filters</h3>
                     <div className="flex flex-wrap gap-2 px-4">
-                      {group.options.map((filterOption, index) => {
-                        const isActive = activeFilters.some(f => f.key === filterOption.key && f.value === filterOption.value);
-                        return (
-                          <button
-                            key={index}
-                            type="button"
-                            onClick={() => handleMenuClick(filterOption)}
-                            className={`px-3 py-1 text-sm rounded-full ${
-                              isActive
-                              ? 'bg-indigo-600 text-white hover:bg-indigo-700'
-                              : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
-                            }`}
-                          >
-                            {filterOption.label}
-                          </button>
-                        );
-                      })}
+                      {group.options.map((option, index) => (
+                        <button key={index} type="button" onClick={() => handleMenuClick(option)} className={`px-3 py-1 text-sm rounded-full ${activeFilters.some(f => f.key === option.key && f.value === option.value) ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-800 hover:bg-gray-200'}`}>
+                          {option.label}
+                        </button>
+                      ))}
                     </div>
                   </div>
                 )
               ))
-            ) : (
-              <div className="py-2 px-4 text-sm text-gray-500">No filters available.</div>
-            )}
+            ) : <div className="py-2 px-4 text-sm text-gray-500">No filters available.</div>}
           </div>
         </div>
       )}
     </div>
   );
 };
-// --- END: OdooSearchBar Component ---
 
-
-// - MAIN PAGE COMPONENT -
 const ProductsPage = () => {
   const navigate = useNavigate();
   const { products, isLoading, deleteProduct, isOnline } = useProducts();
@@ -171,425 +120,116 @@ const ProductsPage = () => {
   const isMutationDisabled = !isOnline;
   const disabledClass = 'opacity-50 cursor-not-allowed';
 
-  const toggleExportMenu = () => {
-    setIsExportMenuOpen(prev => !prev);
-  };
-
-  const closeExportMenu = () => {
-    setIsExportMenuOpen(false);
-  };
-
-  // - START: DELETE LOGIC -
   const handleDeleteProduct = async (productId, sku) => {
-    if (!isOnline) {
-      alert('Cannot delete product in Offline Mode. Please connect to the internet.');
-      return;
-    }
-    if (window.confirm(`Are you sure you want to delete SKU: ${sku}? This action is permanent.`)) {
-      try {
-        await deleteProduct(productId);
-      } catch (error) {
-        alert(`Failed to delete product: ${error.message}`);
-        console.error("Deletion Error:", error);
-      }
+    if (isMutationDisabled) return;
+    if (window.confirm(`Are you sure you want to delete SKU: ${sku}? This is permanent.`)) {
+      try { await deleteProduct(productId); } catch (error) { alert(`Failed to delete: ${error.message}`); }
     }
   };
-  // - END: DELETE LOGIC -
-  
-  // --- START: EXPORT LOGIC (Kept as is) ---
-  const exportToExcel = () => {
-    if (!filteredProducts.length) {
-      alert("No products to export in the current view.");
-      return;
-    }
 
-    const worksheetData = filteredProducts.map(p => ({
-      SKU: p.sku,
-      Model: p.model || "",
-      Brand: p.brand || "",
-      Category: p.category || "",
-      Description: p.description || "", 
-      ReorderPoint: p.reorderPoint || 0,
-    }));
-    const ws = XLSX.utils.json_to_sheet(worksheetData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Current_View_Products");
-    XLSX.writeFile(wb, "products_export.xlsx");
-  };
-
-  const exportToPdf = () => {
-    if (!filteredProducts.length) {
-      alert("No products to export in the current view.");
-      return;
-    }
-
-    const doc = new jsPDF();
-    doc.setFontSize(16);
-    doc.text("Products Export (Current View)", 14, 20);
-    doc.setFontSize(10);
-    doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 28);
-
-    autoTable(doc, {
-      head: [["SKU", "Model", "Brand", "Category", "Description", "Reorder Point"]],
-      body: filteredProducts.map(p => [
-        p.sku,
-        p.model || "",
-        p.brand || "",
-        p.category || "",
-        p.description || "",
-        p.reorderPoint || 0
-      ]),
-      startY: 36,
-      theme: "grid",
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [33, 150, 243] },
-    });
-    doc.save("products_export.pdf");
-  };
-    
-  const handleExport = (format) => {
-    if (format === 'excel') {
-      exportToExcel();
-    } else if (format === 'pdf') {
-      exportToPdf();
-    }
-    setIsExportMenuOpen(false);
-  };
-  // --- END: EXPORT LOGIC ---
-
-
-  /*** Memoized list of products filtered by search text and active filters. (Kept as is)*/
   const filteredProducts = useMemo(() => {
     let currentProducts = products;
-
-    // 1. Apply global text search 
     if (searchText) {
-      const searchTerms = searchText.toLowerCase().split(/\s+/).filter(term => term.length > 0); 
-
-      if (searchTerms.length > 0) { 
-        currentProducts = currentProducts.filter(product => {
-          return searchTerms.every(term => {
-            const searchableText = [
-              product.sku,
-              product.model,
-              product.brand,
-              product.category,
-              product.description 
-            ]
-            .filter(field => field) 
-            .join(' ') 
-            .toLowerCase(); 
-
-            return searchableText.includes(term);
-          });
-        });
-      }
+      const lowerSearch = searchText.toLowerCase();
+      currentProducts = currentProducts.filter(p => 
+        Object.values(p).some(val => String(val).toLowerCase().includes(lowerSearch))
+      );
     }
-
-    // 2. Apply active filters
     if (activeFilters.length > 0) {
-      const groupedFilters = activeFilters.reduce((acc, filter) => {
-        if (!acc[filter.key]) {
-          acc[filter.key] = [];
-        }
-        acc[filter.key].push(filter.value);
-        return acc;
-      }, {});
-      const filterKeys = Object.keys(groupedFilters);
-      
-      currentProducts = currentProducts.filter(product => {
-        return filterKeys.every(filterKey => {
-          const productKey = getProductKeyFromFilterKey(filterKey); 
-          const allowedValues = groupedFilters[filterKey]; 
-
-          return allowedValues.includes(product[productKey]);
-        });
-      });
+      currentProducts = currentProducts.filter(p => 
+        activeFilters.every(f => p[getProductKeyFromFilterKey(f.key)] === f.value)
+      );
     }
-    
     return currentProducts;
   }, [products, searchText, activeFilters]);
 
-  /*** Toggles a filter on/off. (Kept as is)*/
-  const handleFilterToggle = (filter) => {
-    setActiveFilters(prev => {
-      const exists = prev.some(f => f.key === filter.key && f.value === filter.value);
-      if (exists) {
-        return prev.filter(f => !(f.key === filter.key && f.value === filter.value));
-      } else {
-        return [...prev, filter];
-      }
-    });
-  };
-
-  /*** Removes a filter. (Kept as is)*/
-  const handleFilterRemove = (filterToRemove) => {
-    setActiveFilters(prev => prev.filter(f => !(f.key === filterToRemove.key && f.value === filterToRemove.value)));
-  };
-
-  // Categorize filter options for the search bar (Kept as is)
   const categorizedFilterOptions = useMemo(() => {
-    if (!lookups || Object.keys(lookups).length === 0) return [];
-
-    return FILTERABLE_FIELDS.map(field => {
-      const lookupItems = lookups[field.key] || [];
-      return {
-        key: field.key,
-        label: field.label,
-        options: lookupItems.map(value => ({
-          key: field.key,
-          label: value,
-          value: value,
-        })),
-      };
-    });
+    if (!lookups) return [];
+    return FILTERABLE_FIELDS.map(field => ({
+      key: field.key,
+      label: field.label,
+      options: (lookups[field.key] || []).map(value => ({ key: field.key, label: value, value: value }))
+    }));
   }, [lookups]);
 
-
-  // --- START: AG Grid Configuration (IMPROVED) ---
-  
-  // Custom Cell Renderer for the Actions column
   const actionCellRenderer = useCallback((params) => {
-      const product = params.data;
-      
-      const handleViewClick = () => {
-        navigate(`/products/summary/${product.id}`); 
-      };
-
-      const handleEditClick = () => {
-        if (!isMutationDisabled) {
-            navigate(`/products/edit/${product.id}`);
-        }
-      };
-
-      const handleDeleteClick = () => {
-        if (!isMutationDisabled) {
-            handleDeleteProduct(product.id, product.sku);
-        }
-      };
-
-      // IMPROVEMENT: Use p-1 for button padding and flex-end for clean alignment
-      return (
-        <div className="flex justify-end space-x-2 h-full items-center">
-          {/* View Icon (Summary Page) */}
-          <button 
-            onClick={handleViewClick}
-            className="text-blue-600 hover:text-blue-900 p-1" 
-            title="View Summary"
-          >
-            <ViewIcon className="w-5 h-5" />
-          </button>
-          
-          {/* Existing Edit Icon */}
-          <button 
-            onClick={handleEditClick} 
-            className={`text-indigo-600 hover:text-indigo-900 p-1 ${isMutationDisabled ? disabledClass : ''}`} 
-            disabled={isMutationDisabled}
-            title="Edit Product"
-          >
-            <EditIcon className="w-5 h-5" />
-          </button>
-
-          {/* Existing Delete Icon */}
-          <button
-            onClick={handleDeleteClick}
-            className={`text-red-600 hover:text-red-900 p-1 ${isMutationDisabled ? disabledClass : ''}`} 
-            disabled={isMutationDisabled}
-            title="Delete Product"
-          >
-            <DeleteIcon className="w-5 h-5" />
-          </button>
-        </div>
-      );
-  }, [isOnline, navigate, isMutationDisabled, disabledClass, handleDeleteProduct]);
-
-
-  // Custom Cell Renderer for Reorder Point (for Badge Styling)
-  const reorderPointCellRenderer = useCallback((params) => {
-    if (params.value === undefined || params.value === null) return null;
-
-    // Always RED badge — no condition
-    const badgeClass = 'bg-red-100/70 text-red-800 ring-1 ring-red-300';
-
+    const product = params.data;
     return (
-      <div className="flex justify-center items-center h-full">
-        <span
-          className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${badgeClass}`}
-        >
-          {params.value}
-        </span>
+      <div className="flex justify-end space-x-2 h-full items-center">
+        <button onClick={() => navigate(`/products/details/${product.id}`)} className="text-blue-600 hover:text-blue-900 p-1" title="View Details"><ViewIcon className="w-5 h-5" /></button>
+        <button onClick={() => navigate(`/history?sku=${product.sku}`)} className="text-green-600 hover:text-green-900 p-1" title="View History"><HistoryIcon className="w-5 h-5" /></button>
+        <button onClick={() => navigate(`/products/edit/${product.id}`)} className={`text-indigo-600 hover:text-indigo-900 p-1 ${isMutationDisabled ? disabledClass : ''}`} disabled={isMutationDisabled} title="Edit Product"><EditIcon className="w-5 h-5" /></button>
+        <button onClick={() => handleDeleteProduct(product.id, product.sku)} className={`text-red-600 hover:text-red-900 p-1 ${isMutationDisabled ? disabledClass : ''}`} disabled={isMutationDisabled} title="Delete Product"><DeleteIcon className="w-5 h-5" /></button>
       </div>
     );
-  }, []);
+  }, [isOnline, navigate]);
 
-
-  // Column Definitions
   const columnDefs = useMemo(() => ([
-    { field: 'sku', headerName: 'SKU', minWidth: 120, filter: true }, 
-    { field: 'model', headerName: 'Model', minWidth: 150, filter: true }, 
+    { field: 'sku', headerName: 'SKU', minWidth: 120, filter: true },
+    { field: 'model', headerName: 'Model', minWidth: 150, filter: true },
     { field: 'brand', headerName: 'Brand', minWidth: 100, filter: true },
     { field: 'category', headerName: 'Category', minWidth: 120, filter: true },
-    { 
-      field: 'description', 
-      headerName: 'Description', 
-      filter: true, 
-      flex: 3, 
-      minWidth: 200,
-      // Uses Value Formatter to truncate text, keeping underlying data intact for filtering
-      valueGetter: (params) => params.data.description || '', 
-      valueFormatter: (params) => {
-        const desc = params.value;
-        return desc ? (desc.length > 50 ? desc.substring(0, 50) + '...' : desc) : '';
-      }
-    },
-    { 
-      field: 'reorderPoint', 
-      headerName: 'Reorder At', 
-      filter: 'agNumberColumnFilter', 
-      width: 150, 
-      maxWidth: 150,
-      cellStyle: { textAlign: 'center' }, // Centered text for number column
-      cellRenderer: reorderPointCellRenderer // Use the custom badge renderer
-    },
-    { 
-      field: 'actions', 
-      headerName: 'Actions', 
-      cellRenderer: actionCellRenderer, 
-      sortable: false, 
-      filter: false, 
-      width: 150, 
-      minWidth: 150,
-      maxWidth: 150,
-      pinned: 'right', 
-      cellClass: 'ag-cell-actions', // Custom class for action alignment (defined in CSS above)
+    { field: 'description', headerName: 'Description', filter: true, flex: 3, minWidth: 200, valueFormatter: p => p.value && p.value.length > 50 ? p.value.substring(0, 50) + '...' : p.value },
+    { field: 'reorderPoint', headerName: 'Reorder At', filter: 'agNumberColumnFilter', width: 120, cellStyle: { textAlign: 'center' }, cellRenderer: p => p.value ? <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">{p.value}</span> : null },
+    { field: 'actions', headerName: 'Actions', cellRenderer: actionCellRenderer, sortable: false, filter: false, width: 150, minWidth: 150, pinned: 'right' }
+  ]), [actionCellRenderer]);
+
+  const defaultColDef = useMemo(() => ({ resizable: true, sortable: true, filter: true, suppressHeaderMenuButton: true, flex: 1, minWidth: 80 }), []);
+
+  const exportTo = (format) => {
+    const data = filteredProducts.map(p => ({ SKU: p.sku, Model: p.model, Brand: p.brand, Category: p.category, Description: p.description, ReorderPoint: p.reorderPoint }));
+    if (format === 'excel') {
+      const ws = XLSX.utils.json_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Products");
+      XLSX.writeFile(wb, "products.xlsx");
+    } else {
+      const doc = new jsPDF();
+      doc.text("Product List", 14, 15);
+      doc.autoTable({ head: [Object.keys(data[0])], body: data.map(Object.values) });
+      doc.save("products.pdf");
     }
-  ]), [actionCellRenderer, reorderPointCellRenderer]);
+    setIsExportMenuOpen(false);
+  };
 
-  // Default configuration for all columns
-  const defaultColDef = useMemo(() => ({
-    resizable: true,
-    sortable: true,
-    filter: true,
-    suppressHeaderMenuButton: true,
-    flex: 1, 
-    minWidth: 80, 
-  }), []);
-  
-  // --- END: AG Grid Configuration ---
-
-  if (isLoading) {
-    return <div className="p-8 text-xl text-center">Loading Products...</div>;
-  }
+  if (isLoading) return <div className="p-8 text-xl text-center">Loading Products...</div>;
 
   return (
     <div className="p-4 bg-gray-100 min-h-screen">
       <h1 className="page-title">Product Management</h1>
-
-      {/* Action Buttons (Navigation) */}
       <div className="flex flex-wrap gap-2 mb-6">
-        <button
-          onClick={() => navigate('/products/add')}
-          className="btn btn-primary"
-          disabled={isMutationDisabled}
-        >
-          Add Product
-        </button>
-        <button
-          onClick={() => navigate('/products/bulk-import')} 
-          className="btn btn-secondary" 
-          disabled={isMutationDisabled}
-        >
-          Bulk Import
-        </button>
-
-        {/* Export Button with Click-Triggered Dropdown */}
+        <button onClick={() => navigate('/products/add')} className="btn btn-primary" disabled={isMutationDisabled}>Add Product</button>
+        <button onClick={() => navigate('/products/bulk-import')} className="btn btn-secondary" disabled={isMutationDisabled}>Bulk Import</button>
         <div className="relative inline-block text-left">
-          <button
-            type="button"
-            className="btn btn-secondary" 
-            aria-haspopup="true"
-            aria-expanded={isExportMenuOpen} 
-            title="Toggle Export Options"
-            onClick={toggleExportMenu} 
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            Export
-          </button>
-          
-          <div
-            id="export-dropdown-menu" 
-            className={`absolute right-0 mt-1 w-48 z-10 transition-opacity duration-100 ${
-              isExportMenuOpen ? 'opacity-100 visible' : 'opacity-0 invisible'
-            }`}
-          >
-            <ul role="none" className="py-1 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5">
-              <li>
-                <button
-                  onClick={() => handleExport('pdf')} 
-                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
-                  role="menuitem"
-                >
-                  Export as PDF (.pdf)
-                </button>
-              </li>
-              <li>
-                <button
-                  onClick={() => handleExport('excel')} 
-                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
-                  role="menuitem"
-                >
-                  Export as Excel (.xlsx)
-                </button>
-              </li>
-            </ul>
-          </div>
+          <button type="button" className="btn btn-secondary" onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}>Export</button>
+          {isExportMenuOpen && (
+            <div className="absolute right-0 mt-1 w-48 z-10 py-1 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5">
+              <button onClick={() => exportTo('pdf')} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">As PDF</button>
+              <button onClick={() => exportTo('excel')} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">As Excel</button>
+            </div>
+          )}
         </div>
       </div>
-
-
-      {/* Search and Filter Bar - Uses themed class 'card' */}
-      <div className="mb-6 card"> 
-        <OdooSearchBar
-          lookups={lookups}
-          searchText={searchText}
-          setSearchText={setSearchText}
-          activeFilters={activeFilters}
-          onFilterToggle={handleFilterToggle}
-          onFilterRemove={handleFilterRemove}
-          categorizedFilterOptions={categorizedFilterOptions}
-        />
+      <div className="mb-6 card">
+        <OdooSearchBar lookups={lookups} searchText={searchText} setSearchText={setSearchText} activeFilters={activeFilters} onFilterToggle={(f) => setActiveFilters(p => p.some(pf => pf.key === f.key && pf.value === f.value) ? p.filter(pf => !(pf.key === f.key && pf.value === f.value)) : [...p, f])} onFilterRemove={(f) => setActiveFilters(p => p.filter(pf => !(pf.key === f.key && pf.value === f.value)))} categorizedFilterOptions={categorizedFilterOptions} />
       </div>
-
-
-      {/* AG Grid Component */}
-      <div className="bg-white shadow overflow-hidden rounded-lg"> 
+      <div className="bg-white shadow overflow-hidden rounded-lg">
         {products.length === 0 ? (
-          <p className="p-6 text-center text-gray-500">No products found. Add some products to get started.</p>
+          <p className="p-6 text-center text-gray-500">No products found. Add one to begin.</p>
         ) : (
-          <div 
-            className="ag-theme-indigo" 
-            style={{ width: '100%', height: 600 }} 
-          >
-            {/* The pagination controls are correctly enabled here */}
+          <div className="ag-theme-indigo" style={{ width: '100%', height: 600 }}>
             <AgGridReact
-              rowData={filteredProducts} 
+              rowData={filteredProducts}
               columnDefs={columnDefs}
               defaultColDef={defaultColDef}
-
-              pagination={true} 
-              paginationPageSize={25} 
-              paginationPageSizeSelector={[10, 25, 50, 100]} 
-              
-              rowSelection={{ mode: 'multiRow' }} 
-              
-              ensureDomOrder={true}
+              pagination={true}
+              paginationPageSize={25}
+              paginationPageSizeSelector={[10, 25, 50, 100]}
+              rowSelection={{ mode: 'multiple' }} // <-- FIX APPLIED
             />
           </div>
         )}
       </div>
-
     </div>
   );
 };

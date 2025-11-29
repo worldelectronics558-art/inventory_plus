@@ -34,7 +34,7 @@ const customSelectStyles = {
     control: (provided, state) => ({
         ...provided,
         width: '100%',
-        backgroundColor: 'secondary-50', // bg-secondary-50
+        backgroundColor: '#dff6f4', // bg-secondary-50
         color: '#064E3B', // text-primary-900
         border: state.isFocused ? '2px solid #059669' : '1px solid #CFD9E4',
         borderRadius: '0.5rem',
@@ -70,7 +70,7 @@ const customSelectStyles = {
     menu: (provided) => ({
         ...provided,
         zIndex: 20,
-        backgroundColor: 'secondary-50', // bg-secondary-50
+        backgroundColor: '#dff6f4', // bg-secondary-50
         borderRadius: '0.5rem',
         boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
     }),

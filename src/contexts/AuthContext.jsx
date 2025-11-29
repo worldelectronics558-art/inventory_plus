@@ -15,6 +15,7 @@ import localforage from 'localforage';
 
 // --- LocalForage Store for Offline Credentials ---
 const CREDENTIALS_KEY = 'offlineUserCreds';
+const ALL_USERS_KEY = 'allOfflineUsers';
 
 // ----------------------------------------------------------------------
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
@@ -31,7 +32,8 @@ const AuthContext = createContext({
     auth: null,
     secondaryAuth: null, // For user creation
     db: null,
-    isOnline: false, 
+    isOnline: false,
+    isNetworkAvailable: true,
     goOnline: () => {}, 
     goOffline: () => {}, 
     signOut: () => {}, 
@@ -49,10 +51,17 @@ export const AuthProvider = ({ children }) => {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [authReady, setAuthReady] = useState(false);
     const [isFirebaseInitialized, setIsFirebaseInitialized] = useState(false);
-    const [isManualOnlineMode, setIsManualOnlineMode] = useState(false); 
-    
+    const [isManualOnlineMode, setIsManualOnlineMode] = useState(true);
+    const [isNetworkAvailable, setIsNetworkAvailable] = useState(navigator.onLine);
+
     // --- 1. Initialization (Run once) ---
     useEffect(() => {
+        const handleOnline = () => setIsNetworkAvailable(true);
+        const handleOffline = () => setIsNetworkAvailable(false);
+
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+
         if (!firebaseConfigRaw) {
             console.error("Firebase Config Error: __firebase_config is missing.");
             setAuthReady(true);
@@ -69,14 +78,12 @@ export const AuthProvider = ({ children }) => {
         }
 
         try {
-            // Primary App ([DEFAULT])
             const defaultApp = initializeApp(config);
             const authInstance = getAuth(defaultApp);
             const dbInstance = getFirestore(defaultApp); 
             setAuth(authInstance);
             setDb(dbInstance);
 
-            // Secondary App for user management
             const secondaryApp = initializeApp(config, 'secondary');
             const secondaryAuthInstance = getAuth(secondaryApp);
             setSecondaryAuth(secondaryAuthInstance);
@@ -85,23 +92,23 @@ export const AuthProvider = ({ children }) => {
         } catch (error) {
              if (error.code === 'duplicate-app') {
                 console.warn("Firebase duplicate app initialization avoided.");
-                // This can happen with React's StrictMode, it's generally safe to ignore
-                // but we should ensure state is correctly set.
                 if (!auth) setAuth(getAuth(initializeApp(config)));
                 if (!db) setDb(getFirestore(initializeApp(config)));
                 if (!secondaryAuth) {
                      const secondaryApp = initializeApp(config, 'secondary');
                      setSecondaryAuth(getAuth(secondaryApp));
                 }
-
             } else {
                 console.error("Firebase Initialization Error:", error);
             }
-            // Ensure app proceeds even if initialization has issues
              if (!isFirebaseInitialized) {
                 setIsFirebaseInitialized(true);
             }
         }
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+        };
     }, []); 
 
     // --- 2. Initial Session Check and Listener Setup ---
@@ -110,14 +117,32 @@ export const AuthProvider = ({ children }) => {
 
         let isMounted = true;
         
+        const autoSignIn = async () => {
+            if (auth.currentUser) return;
+            const offlineUser = await localforage.getItem(CREDENTIALS_KEY);
+            if (offlineUser && offlineUser.email && offlineUser.password) {
+                try {
+                    await signInWithEmailAndPassword(auth, offlineUser.email, offlineUser.password);
+                    setIsManualOnlineMode(true);
+                } catch (error) {
+                    console.error("Auto sign-in failed:", error);
+                    setIsManualOnlineMode(false);
+                }
+            }
+        };
+        
         const checkPersistenceAndAuth = async () => {
+            if (isNetworkAvailable) {
+                await autoSignIn();
+            } else {
+                setIsManualOnlineMode(false);
+            }
              let offlineData = null;
              if (isTauriAvailable) { 
                  try {
                      offlineData = await tauriInvoke('load_offline_auth'); 
                      setUserId(offlineData.user_id);
                      setIsAuthenticated(true);
-                     setIsManualOnlineMode(false); 
                      console.log("TAURI OFFLINE: Loaded session from disk for UID:", offlineData.user_id);
                  } catch (e) {
                      console.log("TAURI OFFLINE: No valid offline session found or error loading it.");
@@ -127,7 +152,6 @@ export const AuthProvider = ({ children }) => {
              if (!auth.currentUser && initialAuthToken) { 
                  try {
                      await signInWithCustomToken(auth, initialAuthToken);
-                     setIsManualOnlineMode(false);
                  } catch (e) {
                      console.error("SESSION: Failed to sign in with host-provided token.", e);
                  }
@@ -139,12 +163,10 @@ export const AuthProvider = ({ children }) => {
                 if (firebaseUser && !firebaseUser.isAnonymous) {
                     setUserId(firebaseUser.uid);
                     setIsAuthenticated(true);
-                    localStorage.removeItem('auth_user_id'); 
-                } else if (!userId) { 
+                    setIsManualOnlineMode(true);
+                } else { 
                     setUserId(null);
                     setIsAuthenticated(false);
-                    setIsManualOnlineMode(false); 
-                    localStorage.removeItem('auth_user_id'); 
                 }
                 
                 if (!authReady) {
@@ -152,7 +174,6 @@ export const AuthProvider = ({ children }) => {
                     if (offlineUser && !isAuthenticated) {
                         setUserId(offlineUser.uid);
                         setIsAuthenticated(true);
-                        setIsManualOnlineMode(false); 
                     }
                     console.log("USER CONTEXT: Auth check complete. App is ready.");
                     setAuthReady(true);
@@ -166,28 +187,32 @@ export const AuthProvider = ({ children }) => {
             isMounted = false;
             unsubscribe();
         };
-    }, [isFirebaseInitialized, auth, db, authReady, isAuthenticated, userId]); 
+    }, [isFirebaseInitialized, auth, db, authReady, isAuthenticated, userId, isNetworkAvailable]); 
     
     // --- 3. Manual Online/Offline Handlers ---
-    const goOnline = useCallback(async (email, password) => {
+    const goOnline = useCallback(async () => {
         if (!auth) throw new Error("Authentication service is not initialized.");
-        if (!email || !password) throw new Error("Credentials required to go online.");
+        const offlineUser = await localforage.getItem(CREDENTIALS_KEY);
+        if (!offlineUser || !offlineUser.email || !offlineUser.password) {
+            throw new Error("No cached credentials available to go online.");
+        }
 
         try {
-            const userCredential = await signInWithEmailAndPassword(auth, email, password);
+            await signInWithEmailAndPassword(auth, offlineUser.email, offlineUser.password);
             setIsManualOnlineMode(true);
-            return userCredential.user.uid;
         } catch (error) {
             console.error("GO ONLINE FAILED (Firebase login):", error);
-            setIsManualOnlineMode(false); 
-            throw new Error(`Connection failed. Check credentials: ${error.message}`);
+            throw new Error(`Connection failed: ${error.message}`);
         }
     }, [auth]);
 
     const goOffline = useCallback(async () => {
+        if (auth && auth.currentUser) {
+            await firebaseSignOut(auth);
+        }
         setIsManualOnlineMode(false);
         console.log("App switched to Manual Offline Mode.");
-    }, []);
+    }, [auth]);
 
     // --- 4. Sign In Handler (Used for Login Page) ---
     const signIn = useCallback(async (email, password) => {
@@ -199,7 +224,12 @@ export const AuthProvider = ({ children }) => {
             const userCredential = await signInWithEmailAndPassword(auth, email, password);
             const uid = userCredential.user.uid;
 
-            await localforage.setItem(CREDENTIALS_KEY, { uid, email, lastLogin: Date.now() });
+            const userData = { uid, email, password, lastLogin: Date.now() };
+            await localforage.setItem(CREDENTIALS_KEY, userData);
+
+            let allUsers = await localforage.getItem(ALL_USERS_KEY) || {};
+            allUsers[uid] = userData;
+            await localforage.setItem(ALL_USERS_KEY, allUsers);
             
             if (isTauriAvailable) {
                 const authToken = await userCredential.user.getIdToken();
@@ -210,17 +240,20 @@ export const AuthProvider = ({ children }) => {
                 }
             }
             
-            setIsManualOnlineMode(false); 
+            setIsManualOnlineMode(true); 
             return uid;
             
         } catch (onlineError) {
-            const cachedCreds = await localforage.getItem(CREDENTIALS_KEY);
-            if (cachedCreds && cachedCreds.email === email) {
-                setUserId(cachedCreds.uid);
+            const allUsers = await localforage.getItem(ALL_USERS_KEY) || {};
+            const cachedUser = Object.values(allUsers).find(u => u.email === email && u.password === password);
+
+            if (cachedUser) {
+                setUserId(cachedUser.uid);
                 setIsAuthenticated(true);
                 setIsManualOnlineMode(false);
+                await localforage.setItem(CREDENTIALS_KEY, cachedUser);
                 console.log("OFFLINE LOGIN SUCCESS: Authenticated against local cache.");
-                return cachedCreds.uid;
+                return cachedUser.uid;
             }
             
             throw new Error("Login failed. Check connection or your previous successful login credentials.");
@@ -237,7 +270,6 @@ export const AuthProvider = ({ children }) => {
             
             setUserId(null);
             setIsAuthenticated(false);
-            setIsManualOnlineMode(false);
             console.log("SIGN OUT: User signed out, credentials cache cleared.");
         } catch (error) {
             console.error("SIGN OUT ERROR:", error);
@@ -250,10 +282,11 @@ export const AuthProvider = ({ children }) => {
             isAuthenticated, 
             authReady, 
             auth, 
-            secondaryAuth, // Provide secondary auth context
+            secondaryAuth,
             db, 
             appId: appId,
-            isOnline: isManualOnlineMode, 
+            isOnline: isNetworkAvailable && isManualOnlineMode,
+            isNetworkAvailable,
             goOnline, 
             goOffline, 
             signOut, 

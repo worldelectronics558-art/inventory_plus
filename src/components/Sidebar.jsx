@@ -8,14 +8,15 @@ import { useUser } from '../contexts/UserContext.jsx';
 // --- END: IMPORTS ---
 
 // --- ICONS ---
-import { Cloud, CloudOff, LayoutDashboard, Package, Warehouse, Users, Settings, LogOut, X } from 'lucide-react'; 
+import { Cloud, CloudOff, LayoutDashboard, Package, Warehouse, Users, Settings, LogOut, X, History } from 'lucide-react'; 
 // --- END: ICONS ---
 
 // Updated Data structure for navigation items
 const navItems = [
     { name: 'Dashboard', icon: LayoutDashboard, route: '/' },
-    { name: 'Products', icon: Package, route: '/products', permission: 'canViewProducts' }, // Changed to canViewProducts
-    { name: 'Inventory', icon: Warehouse, route: '/inventory', permission: 'canViewInventory' }, // Changed to canViewInventory
+    { name: 'Products', icon: Package, route: '/products', permission: 'canViewProducts' },
+    { name: 'Inventory', icon: Warehouse, route: '/inventory', permission: 'canViewInventory' },
+    { name: 'History', icon: History, route: '/history' },
     { name: 'Settings', icon: Settings, route: '/settings' },
 ];
 
@@ -31,20 +32,16 @@ const Sidebar = ({ isCollapsed, toggleSidebar }) => {
     const location = useLocation();
 
     // --- GET DATA FROM CONTEXTS ---
-    const { userPermissions } = useUser(); // Simplified to just get permissions
-    const { isOnline, userId, goOnline, goOffline, signOut, isAuthenticated } = useAuth(); 
+    const { userPermissions } = useUser();
+    const { isOnline, isNetworkAvailable, goOnline, goOffline, signOut, isAuthenticated } = useAuth(); 
     // --- END: GET CONTEXT DATA ---
 
-    // --- STATE FOR RECONNECT FORM ---
-    const [showReconnectForm, setShowReconnectForm] = useState(false);
-    const [reconnectEmail, setReconnectEmail] = useState('');
-    const [reconnectPassword, setReconnectPassword] = useState('');
-    const [reconnectError, setReconnectError] = useState('');
-    // --- END: STATE ---
+    const [connectionError, setConnectionError] = useState('');
 
     // --- HANDLE CONNECTION BUTTON CLICK ---
-    const handleConnectionClick = () => {
+    const handleConnectionClick = async () => {
         if (!isAuthenticated) return;
+        setConnectionError('');
 
         if (isOnline) {
             const confirmation = window.confirm("Are you sure you want to switch to OFFLINE mode? This will stop live sync.");
@@ -52,31 +49,15 @@ const Sidebar = ({ isCollapsed, toggleSidebar }) => {
                 goOffline(); 
             }
         } else {
-            setShowReconnectForm(true);
-            setReconnectError('');
-        }
-    };
-    // --- END: HANDLER ---
-
-    // --- HANDLE RECONNECT FORM SUBMISSION ---
-    const handleReconnectSubmit = async (e) => {
-        e.preventDefault();
-        setReconnectError('');
-
-        if (!reconnectEmail.trim() || !reconnectPassword.trim()) {
-             setReconnectError("Email and Password are required.");
-             return;
-        }
-
-        try {
-            await goOnline(reconnectEmail.trim(), reconnectPassword.trim()); 
-            console.log("Successfully reconnected!");
-            setShowReconnectForm(false);
-            setReconnectEmail('');
-            setReconnectPassword('');
-            setReconnectError(''); 
-        } catch (error) {
-            setReconnectError(error.message); 
+            if (isNetworkAvailable) {
+                try {
+                    await goOnline();
+                } catch (error) {
+                    setConnectionError(error.message);
+                }
+            } else {
+                setConnectionError("No network connection available.");
+            }
         }
     };
     // --- END: HANDLER ---
@@ -130,59 +111,25 @@ const Sidebar = ({ isCollapsed, toggleSidebar }) => {
                             : <CloudOff className="w-4 h-4" />}
                         {!isCollapsed && <span className='ml-2'>Status: {isOnline ? 'Online' : 'Offline'}</span>}
                     </div>
-                    {!isCollapsed && <div>{isOnline ? 'Go Offline' : 'Go Online'}</div>}
+                    {!isCollapsed && <div>{isOnline ? 'Go Offline' : (isNetworkAvailable ? 'Go Online' : 'Offline')}</div>}
                 </button>
-            </div>
-
-            {showReconnectForm && !isOnline && !isCollapsed && (
-                <div className="mx-2 mb-2 p-3 bg-indigo-900/80 rounded-lg shadow-inner">
-                    <div className="flex justify-between items-center mb-2">
-                        <p className="text-sm font-semibold text-white">Connect to Server</p>
-                        <button onClick={() => setShowReconnectForm(false)} className="text-gray-300 hover:text-white">
-                            <X size={16} />
-                        </button>
+                {connectionError && !isCollapsed && (
+                    <div className="mx-2 my-2 p-2 bg-red-800/90 rounded-lg shadow-inner text-white text-xs">
+                        <div className="flex justify-between items-center">
+                            <span>{connectionError}</span>
+                            <button onClick={() => setConnectionError('')} className="text-gray-300 hover:text-white">
+                                <X size={14} />
+                            </button>
+                        </div>
                     </div>
-
-                    <form onSubmit={handleReconnectSubmit} className="space-y-2">
-                        <input
-                            type="email"
-                            placeholder="Email"
-                            value={reconnectEmail}
-                            onChange={(e) => setReconnectEmail(e.target.value)}
-                            required
-                            className="input-base w-full" 
-                        />
-                        <input
-                            type="password"
-                            placeholder="Password"
-                            value={reconnectPassword}
-                            onChange={(e) => setReconnectPassword(e.target.value)}
-                            required
-                            className="input-base w-full" 
-                        />
-                        <button
-                            type="submit"
-                            className="btn btn-accent w-full" 
-                        >
-                            Connect
-                        </button>
-                    </form>
-
-                    {reconnectError && (
-                        <p className="error-message mt-2"> 
-                            Error: {reconnectError}
-                        </p>
-                    )}
-                </div>
-            )}
+                )}
+            </div>
 
             <nav className="sidebar-nav grow p-2">
                 {navItems.map((item) => {
-                    // Hide item if user is not authenticated and it's not the dashboard
                     if (!isAuthenticated && item.route !== '/') {
                         return null;
                     }
-                    // Hide item if a specific permission is required and the user doesn't have it
                     if (item.permission && !userPermissions[item.permission]) {
                         return null;
                     }
