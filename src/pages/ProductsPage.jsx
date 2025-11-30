@@ -10,9 +10,10 @@ import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 // AG Grid Imports
 import { AgGridReact } from 'ag-grid-react';
-import { ModuleRegistry, AllCommunityModules } from 'ag-grid-community';
+import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community'; 
 
-ModuleRegistry.registerModules(AllCommunityModules);
+// Register all Community features
+ModuleRegistry.registerModules([AllCommunityModule]);
 
 
 // --- START: ICONS ---
@@ -225,7 +226,7 @@ const ProductsPage = () => {
               pagination={true}
               paginationPageSize={25}
               paginationPageSizeSelector={[10, 25, 50, 100]}
-              rowSelection={{ mode: 'multiple' }} // <-- FIX APPLIED
+              rowSelection={{ mode: 'multiRow' }} // <-- FIX APPLIED
             />
           </div>
         )}

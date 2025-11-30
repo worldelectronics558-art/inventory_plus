@@ -14,6 +14,7 @@ import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import AddLocationModal from '../../components/AddLocationModal'; // Import the modal
+import { getProductBySku, getProductDisplayName } from '../../utils/productUtils';
 
 // --- FORM STATE PERSISTENCE ---
 const FORM_STATE_STORE_NAME = 'formStatesCache';
@@ -23,11 +24,6 @@ const formStateStore = localforage.createInstance({
 });
 const FORM_STATE_KEYS = { STOCK_OUT: 'formState_stockOut' };
 // --- END: FORM STATE --- 
-
-// --- UTILITY FUNCTIONS ---
-const getProductBySku = (products, sku) => products.find(p => p.sku === sku);
-const getProductDisplayName = (product) => product ? `${product.sku} - ${product.model || 'N/A'}` : 'Unknown Product';
-// --- END: UTILITIES ---
 
 // --- STYLING FOR REACT-SELECT ---
 const customSelectStyles = {
@@ -93,8 +89,13 @@ const StockOutForm = () => {
     const { stockLevels, createTransaction } = useInventory();
     const { products } = useProducts();
     const { locations, isLoading: isLocationsLoading } = useLocations();
-    const { userId, currentUser: authUser } = useAuth();
-    const { userPermissions, assignedLocations: rawAssignedLocations } = useUser();
+    const { auth } = useAuth();
+    const { 
+        currentUser, 
+        userPermissions, 
+        assignedLocations: rawAssignedLocations, 
+        isLoading: isUserLoading 
+    } = useUser();
     const { setAppProcessing } = useLoading();
 
     // --- STATE MANAGEMENT ---
@@ -166,13 +167,6 @@ const StockOutForm = () => {
     // --- END: PERSISTENCE ---
 
     // --- HANDLERS ---
-    const generateReferenceNumber = (userEmail) => {
-        const userPrefix = (userEmail || 'USER').slice(0, 4).toUpperCase();
-        const now = new Date();
-        const ts = `${now.getFullYear()}${(now.getMonth() + 1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}${now.getHours().toString().padStart(2, '0')}${now.getMinutes().toString().padStart(2, '0')}${now.getSeconds().toString().padStart(2, '0')}`;
-        return `${userPrefix}-OUT-${ts}`;
-    };
-
     const handleItemChange = (index, field, value) => {
         const newItems = [...items];
         newItems[index][field] = value;
@@ -196,6 +190,10 @@ const StockOutForm = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (!currentUser || !auth.currentUser) {
+            alert('User data is not loaded yet. Please try again in a moment.');
+            return;
+        }
         if (items.some(item => !item.sku || !item.location || !item.reason || item.quantity <= 0)) {
             alert('Please fill in all SKU, Location, Quantity, and Reason fields correctly.');
             return;
@@ -209,23 +207,20 @@ const StockOutForm = () => {
             }
         }
 
-        const refNumber = generateReferenceNumber(authUser?.email);
         setAppProcessing(true);
         try {
             await createTransaction({
                 type: 'OUT',
-                referenceNumber: refNumber,
-                transactionDate: new Date(transactionDate),
                 notes,
                 documentNumber,
                 items: items.map(item => ({
                     sku: item.sku.value,
+                    productName: item.sku.label,
                     location: item.location.value,
                     quantity: item.quantity,
                     reason: item.reason.value,
                 })),
-                userId,
-            });
+            }, auth.currentUser);
             alert('Stock Out transaction recorded successfully!');
             await formStateStore.removeItem(FORM_STATE_KEYS.STOCK_OUT);
             navigate('/inventory');
@@ -276,7 +271,7 @@ const StockOutForm = () => {
         return <div className="p-8 text-center text-red-600">Access Denied.</div>;
     }
 
-    if (isLoadingFormState || isLocationsLoading) {
+    if (isLoadingFormState || isLocationsLoading || isUserLoading) {
         return <div className="p-8 text-center">Loading Form...</div>;
     }
 
@@ -309,7 +304,7 @@ const StockOutForm = () => {
                         </div>
                         <div>
                             <label className="block text-sm font-medium mb-1">Notes</label>
-                            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows="2" className="input-base" />
+                            <textarea value={notes} onChange={(e) => setNotes(e.targe.value)} rows="2" className="input-base" />
                         </div>
                         <div className="border rounded-lg overflow-hidden">
                             <table className="table-base w-full" style={{borderCollapse: 'separate', borderSpacing: '0.5rem'}}>
@@ -356,7 +351,7 @@ const StockOutForm = () => {
                                         </div>
                                     )}
                                 </div>
-                                <button type="submit" className="btn btn-danger">Commit Stock Out</button>
+                                <button type="submit" className="btn btn-danger" disabled={!currentUser}>Commit Stock Out</button>
                             </div>
                         </div>
                     </form>

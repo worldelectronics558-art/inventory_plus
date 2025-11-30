@@ -14,6 +14,7 @@ import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import AddLocationModal from '../../components/AddLocationModal'; // Import the modal
+import { getProductBySku, getProductDisplayName } from '../../utils/productUtils';
 
 // --- FORM STATE PERSISTENCE ---
 const FORM_STATE_STORE_NAME = 'formStatesCache';
@@ -23,11 +24,6 @@ const formStateStore = localforage.createInstance({
 });
 const FORM_STATE_KEYS = { TRANSFER: 'formState_transfer' };
 // --- END: FORM STATE --- 
-
-// --- UTILITY FUNCTIONS ---
-const getProductBySku = (products, sku) => products.find(p => p.sku === sku);
-const getProductDisplayName = (product) => product ? `${product.sku} - ${product.model || 'N/A'}` : 'Unknown Product';
-// --- END: UTILITIES ---
 
 // --- STYLING FOR REACT-SELECT ---
 const customSelectStyles = {
@@ -67,8 +63,13 @@ const TransferForm = () => {
     const { stockLevels, createTransaction } = useInventory();
     const { products } = useProducts();
     const { locations, isLoading: isLocationsLoading } = useLocations();
-    const { userId, currentUser: authUser } = useAuth();
-    const { userPermissions, assignedLocations: rawAssignedLocations } = useUser();
+    const { auth } = useAuth();
+    const { 
+        currentUser, 
+        userPermissions, 
+        assignedLocations: rawAssignedLocations, 
+        isLoading: isUserLoading 
+    } = useUser();
     const { setAppProcessing } = useLoading();
 
     // --- STATE MANAGEMENT ---
@@ -135,13 +136,6 @@ const TransferForm = () => {
     // --- END: PERSISTENCE ---
 
     // --- HANDLERS ---
-    const generateReferenceNumber = (userEmail) => {
-        const userPrefix = (userEmail || 'USER').slice(0, 4).toUpperCase();
-        const now = new Date();
-        const ts = `${now.getFullYear()}${(now.getMonth() + 1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}${now.getHours().toString().padStart(2, '0')}${now.getMinutes().toString().padStart(2, '0')}${now.getSeconds().toString().padStart(2, '0')}`;
-        return `${userPrefix}-TRF-${ts}`;
-    };
-
     const handleItemChange = (index, field, value) => {
         const newItems = [...items];
         newItems[index][field] = value;
@@ -179,6 +173,10 @@ const TransferForm = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (!currentUser || !auth.currentUser) {
+            alert('User data is not loaded yet. Please try again in a moment.');
+            return;
+        }
         if (items.some(item => !item.sku || !item.fromLocation || !item.toLocation || item.quantity <= 0)) {
             alert('Please fill in all SKU, From/To Location, and Quantity fields correctly.');
             return;
@@ -192,23 +190,20 @@ const TransferForm = () => {
             }
         }
 
-        const refNumber = generateReferenceNumber(authUser?.email);
         setAppProcessing(true);
         try {
             await createTransaction({
                 type: 'TRANSFER',
-                referenceNumber: refNumber,
-                transactionDate: new Date(transactionDate),
                 notes,
                 documentNumber,
                 items: items.map(item => ({
                     sku: item.sku.value,
+                    productName: item.sku.label,
                     fromLocation: item.fromLocation.value,
                     toLocation: item.toLocation.value,
                     quantity: item.quantity,
                 })),
-                userId,
-            });
+            }, auth.currentUser);
             alert('Transfer transaction recorded successfully!');
             await formStateStore.removeItem(FORM_STATE_KEYS.TRANSFER);
             navigate('/inventory');
@@ -259,7 +254,7 @@ const TransferForm = () => {
         return <div className="p-8 text-center text-red-600">Access Denied.</div>;
     }
 
-    if (isLoadingFormState || isLocationsLoading) {
+    if (isLoadingFormState || isLocationsLoading || isUserLoading) {
         return <div className="p-8 text-center">Loading Form...</div>;
     }
 
@@ -344,7 +339,7 @@ const TransferForm = () => {
                                         </div>
                                     )}
                                 </div>
-                                <button type="submit" className="btn btn-secondary">Commit Transfer</button>
+                                <button type="submit" className="btn btn-secondary" disabled={!currentUser}>Commit Transfer</button>
                             </div>
                         </div>
                     </form>

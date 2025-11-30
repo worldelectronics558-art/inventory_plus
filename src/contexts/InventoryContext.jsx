@@ -30,7 +30,7 @@ export const useInventory = () => useContext(InventoryContext);
 
 export const InventoryProvider = ({ children }) => {
     const { appId, userId, authReady, db, isOnline } = useAuth();
-    const { isLoading: isUserContextLoading, user: currentUser } = useUser();
+    const { isLoading: isUserContextLoading } = useUser();
 
     const [transactions, setTransactions] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -130,119 +130,140 @@ export const InventoryProvider = ({ children }) => {
 
 
     // --- 3. REBUILT: Create Granular Transaction Function ---
-    const createTransaction = async (txData) => {
+    const createTransaction = async (txData, currentUser) => {
         if (!isOnline) {
             throw new Error("Cannot create transaction while offline.");
         }
         if (!txData.type || !currentUser || !Array.isArray(txData.items) || txData.items.length === 0) {
             throw new Error("Invalid transaction data structure.");
         }
-
+    
         const batch = writeBatch(db);
         const txCollectionRef = getTransactionCollectionRef();
         const timestamp = serverTimestamp();
-
-        // 1. Generate IDs for the whole operation
-        const transactionId = doc(collection(db, 'noop')).id; // Firestore way to get a unique ID
+    
+        const transactionId = doc(collection(db, 'noop')).id;
         const userRef = generateUserRef(currentUser);
         const dateStr = format(new Date(), 'yyyyMMddHHmmss');
         const referenceNumber = `${userRef}-${txData.type}-${dateStr}`;
-
+    
         try {
-            // Use a for...of loop to handle async operations correctly
             for (const [index, item] of txData.items.entries()) {
+                const { sku, quantity, productName } = item;
                 const newLogRef = doc(txCollectionRef);
-
+    
+                // Common data for all transaction types
+                const commonLogData = {
+                    transactionId,
+                    referenceNumber,
+                    itemIndex: index + 1,
+                    timestamp,
+                    sku,
+                    quantityChange: quantity,
+                    userId: currentUser.uid,
+                    userName: currentUser.displayName,
+                    productName: productName || '',
+                    reason: item.reason || null,
+                    notes: txData.notes || null,
+                    documentNumber: txData.documentNumber || null,
+                };
+    
                 if (txData.type === 'IN') {
-                    const { sku, location, quantity, productName } = item;
+                    const { location } = item;
                     if (!sku || !location || !quantity) throw new Error('Invalid Stock-In item data.');
-
+    
                     const invDocRef = getInventoryDocRef(sku, location);
                     const invDoc = await getDoc(invDocRef);
                     const quantityBefore = invDoc.exists() ? invDoc.data().quantity || 0 : 0;
                     const quantityAfter = quantityBefore + quantity;
-
-                    // Update inventory document
+    
                     batch.set(invDocRef, { sku, location, quantity: quantityAfter, lastUpdated: timestamp });
-
-                    // Create granular log document
                     batch.set(newLogRef, {
-                        transactionId, referenceNumber, itemIndex: index + 1, type: 'IN', timestamp, sku,
-                        quantityChange: quantity, quantityBefore, quantityAfter, location,
-                        fromLocation: null, toLocation: null,
-                        userId: currentUser.uid, userName: currentUser.displayName,
-                        productName: productName || '', // Denormalized for history
-                        reason: item.reason || null, notes: txData.notes || null, documentNumber: txData.referenceNumber || null
+                        ...commonLogData,
+                        type: 'IN',
+                        quantityBefore,
+                        quantityAfter,
+                        location,
+                        fromLocation: null,
+                        toLocation: null,
                     });
+    
                 } else if (txData.type === 'OUT') {
-                    const { sku, location, quantity, productName } = item;
+                    const { location } = item;
                     if (!sku || !location || !quantity) throw new Error('Invalid Stock-Out item data.');
-
+    
                     const invDocRef = getInventoryDocRef(sku, location);
                     const invDoc = await getDoc(invDocRef);
                     const quantityBefore = invDoc.exists() ? invDoc.data().quantity || 0 : 0;
-
+    
                     if (quantityBefore < quantity) {
                         throw new Error(`Insufficient stock for ${sku} at ${location}.`);
                     }
                     const quantityAfter = quantityBefore - quantity;
-
+    
                     batch.set(invDocRef, { sku, location, quantity: quantityAfter, lastUpdated: timestamp });
-
                     batch.set(newLogRef, {
-                        transactionId, referenceNumber, itemIndex: index + 1, type: 'OUT', timestamp, sku,
-                        quantityChange: quantity, quantityBefore, quantityAfter, location,
-                        fromLocation: null, toLocation: null,
-                        userId: currentUser.uid, userName: currentUser.displayName,
-                        productName: productName || '', 
-                        reason: item.reason || null, notes: txData.notes || null, documentNumber: txData.referenceNumber || null
+                        ...commonLogData,
+                        type: 'OUT',
+                        quantityBefore,
+                        quantityAfter,
+                        location,
+                        fromLocation: null,
+                        toLocation: null,
                     });
-
+    
                 } else if (txData.type === 'TRANSFER') {
-                    const { sku, fromLocation, toLocation, quantity, productName } = item;
+                    const { fromLocation, toLocation } = item;
                     if (!sku || !fromLocation || !toLocation || !quantity) throw new Error('Invalid Transfer item data.');
-                    
-                     // FROM Location Handling
+    
+                    // From Location
                     const fromDocRef = getInventoryDocRef(sku, fromLocation);
                     const fromDoc = await getDoc(fromDocRef);
                     const fromQtyBefore = fromDoc.exists() ? fromDoc.data().quantity : 0;
                     if (fromQtyBefore < quantity) throw new Error(`Insufficient stock for ${sku} at ${fromLocation}.`);
                     const fromQtyAfter = fromQtyBefore - quantity;
                     batch.set(fromDocRef, { sku, location: fromLocation, quantity: fromQtyAfter, lastUpdated: timestamp });
-
-                    // TO Location Handling
+    
+                    // To Location
                     const toDocRef = getInventoryDocRef(sku, toLocation);
                     const toDoc = await getDoc(toDocRef);
                     const toQtyBefore = toDoc.exists() ? toDoc.data().quantity : 0;
                     const toQtyAfter = toQtyBefore + quantity;
                     batch.set(toDocRef, { sku, location: toLocation, quantity: toQtyAfter, lastUpdated: timestamp });
-
-                    // Create TWO log entries for a transfer
+    
+                    // Log for "OUT" part
                     const transferLogRefOut = doc(txCollectionRef);
-                    const transferLogRefInt = doc(txCollectionRef);
-
-                    batch.set(transferLogRefOut, { // Log for the "OUT" part of the transfer
-                        transactionId, referenceNumber, itemIndex: index + 1, type: 'TRANSFER', timestamp, sku, 
-                        quantityChange: quantity, quantityBefore: fromQtyBefore, quantityAfter: fromQtyAfter,
-                        location: null, fromLocation, toLocation, userId: currentUser.uid, userName: currentUser.displayName,
-                        productName: productName || '', reason: item.reason || null, notes: txData.notes || null, documentNumber: txData.referenceNumber || null
+                    batch.set(transferLogRefOut, {
+                        ...commonLogData,
+                        type: 'TRANSFER',
+                        quantityBefore: fromQtyBefore,
+                        quantityAfter: fromQtyAfter,
+                        location: null,
+                        fromLocation,
+                        toLocation,
                     });
-                     batch.set(transferLogRefInt, { // Log for the "IN" part of the transfer
-                        transactionId, referenceNumber, itemIndex: index + 1, type: 'TRANSFER', timestamp, sku, 
-                        quantityChange: quantity, quantityBefore: toQtyBefore, quantityAfter: toQtyAfter,
-                        location: null, fromLocation, toLocation, userId: currentUser.uid, userName: currentUser.displayName,
-                        productName: productName || '', reason: item.reason || null, notes: txData.notes || null, documentNumber: txData.referenceNumber || null
+    
+                    // Log for "IN" part
+                    const transferLogRefInt = doc(txCollectionRef);
+                    batch.set(transferLogRefInt, {
+                        ...commonLogData,
+                        type: 'TRANSFER',
+                        quantityBefore: toQtyBefore,
+                        quantityAfter: toQtyAfter,
+                        location: null,
+                        fromLocation,
+                        toLocation,
                     });
                 }
             }
-
+    
             await batch.commit();
             console.log(`Transaction ${referenceNumber} committed with granular logs.`);
             return referenceNumber;
-
+    
         } catch (error) {
             console.error("Error creating granular transaction:", error);
-            throw error; // Re-throw to be caught by the UI
+            throw error;
         }
     };
 

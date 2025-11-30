@@ -3,7 +3,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useInventory } from '../contexts/InventoryContext';
-import { format } from 'date-fns';
+import { formatDate } from '../utils/formatDate';
 import { ChevronDown, ChevronRight, Filter, Calendar as CalendarIcon, Package, ArrowUp, ArrowDown, ArrowRightLeft, Search, X } from 'lucide-react';
 
 const ITEMS_PER_PAGE = 20;
@@ -16,14 +16,12 @@ const TransactionRow = ({ txGroup }) => {
     const getTxIcon = (type) => {
         const style = { size: 18 };
         switch (type) {
-            case 'IN': return <ArrowUp className="text-green-500" {...style} />;
-            case 'OUT': return <ArrowDown className="text-red-500" {...style} />;
+            case 'IN': return <ArrowDown className="text-green-500" {...style} />;
+            case 'OUT': return <ArrowUp className="text-red-500" {...style} />;
             case 'TRANSFER': return <ArrowRightLeft className="text-blue-500" {...style} />;
             default: return <Package {...style} />;
         }
     };
-
-    const formatDate = (ts) => ts ? format(ts.toDate ? ts.toDate() : new Date(ts), 'MMM dd, yyyy HH:mm') : 'N/A';
 
     return (
         <>

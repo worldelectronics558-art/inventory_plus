@@ -15,20 +15,9 @@ import { autoTable } from 'jspdf-autotable';
 import { AgGridReact } from 'ag-grid-react';
 
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
+import { getProductBySku, getProductDisplayName } from '../utils/productUtils';
     
     ModuleRegistry.registerModules([ AllCommunityModule ]);
-// Helper function to get product details by SKU
-const getProductBySku = (products, sku) => {
-    return products.find(p => p.sku === sku);
-};
-
-// Helper function to get model display name
-const getProductDisplayName = (product) => {
-    if (product) {
-        return `${product.sku} - ${product.model || 'N/A'}`;
-    }
-    return 'Unknown Product';
-};
 
 // --- Main Inventory Page Component ---
 const InventoryPage = () => {
