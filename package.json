@@ -28,6 +28,7 @@
     "lucide-react": "^0.553.0",
     "preline": "^3.2.3",
     "react": "^19.2.0",
+    "react-date-range": "^2.0.1",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.9.5",
     "react-select": "^5.10.2",

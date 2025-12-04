@@ -178,7 +178,7 @@ const UserManagement = () => {
     }
 
     return (
-        <div className="space-y-8 p-4">
+        <div className="space-y-8">
             <div className="user-form-container bg-white p-6 rounded-lg shadow-md">
                 <h2 className="text-2xl font-bold mb-4">{isEditing ? 'Edit User' : 'Create New User'}</h2>
                 <form onSubmit={handleSubmit} className="space-y-4">

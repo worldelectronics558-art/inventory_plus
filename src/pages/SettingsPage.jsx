@@ -46,7 +46,7 @@ const SettingsPage = () => {
     const isAdmin = userPermissions.role === 'admin';
 
     return (
-        <div className="p-8 bg-gray-100 min-h-screen">
+        <div className="bg-gray-100 min-h-screen">
             <h1 className="text-3xl font-bold mb-6 text-gray-800">Application Settings</h1>
 
             <div className="mb-6 border-b border-gray-200">

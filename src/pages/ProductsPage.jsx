@@ -4,10 +4,17 @@ import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom';
 import { useProducts } from '../contexts/ProductContext';
 import { useLookups } from '../contexts/LookupContext';
+import { useInventory } from '../contexts/InventoryContext';
+
+// Responsive & UI Components
+import useMediaQuery from '../hooks/useMediaQuery';
+import ProductCard from '../components/ProductCard';
+
 // Export libraries
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
+
 // AG Grid Imports
 import { AgGridReact } from 'ag-grid-react';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community'; 
@@ -15,8 +22,7 @@ import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 // Register all Community features
 ModuleRegistry.registerModules([AllCommunityModule]);
 
-
-// --- START: ICONS ---
+// --- ICONS ---
 const EditIcon = ({ className = "w-4 h-4" }) => (
   <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -73,7 +79,7 @@ const OdooSearchBar = ({ searchText, setSearchText, activeFilters, onFilterToggl
             {filter.label}
             <button type="button" className="shrink-0 ml-1.5 h-4 w-4 rounded-full inline-flex items-center justify-center text-indigo-400 hover:bg-indigo-200 hover:text-indigo-500 focus:outline-none focus:bg-indigo-500 focus:text-white" onClick={() => onFilterRemove(filter)}>
               <span className="sr-only">Remove filter</span>
-              <svg className="h-2 w-2" stroke="currentColor" fill="none" viewBox="0 0 8 8"><path strokeLinecap="round" strokeWidth="1.5" d="M1 1l6 6m0-6L1 7" /></svg>
+              <svg className="h-2 w-2" stroke="currentColor" fill="none" viewBox="0 0 8 8"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M1 1l6 6m0-6L1 7" /></svg>
             </button>
           </span>
         ))}
@@ -114,22 +120,31 @@ const ProductsPage = () => {
   const navigate = useNavigate();
   const { products, isLoading, deleteProduct, isOnline } = useProducts();
   const { lookups } = useLookups();
+  const { stockLevels } = useInventory();
   const [searchText, setSearchText] = useState('');
   const [activeFilters, setActiveFilters] = useState([]);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   
+  const isMobile = useMediaQuery('(max-width: 767px)');
   const isMutationDisabled = !isOnline;
   const disabledClass = 'opacity-50 cursor-not-allowed';
 
-  const handleDeleteProduct = async (productId, sku) => {
+  const handleDeleteProduct = useCallback(async (productId, sku) => {
     if (isMutationDisabled) return;
     if (window.confirm(`Are you sure you want to delete SKU: ${sku}? This is permanent.`)) {
       try { await deleteProduct(productId); } catch (error) { alert(`Failed to delete: ${error.message}`); }
     }
-  };
+  }, [isMutationDisabled, deleteProduct]);
+
+  const productsWithStock = useMemo(() => {
+    return products.map(p => ({
+        ...p,
+        totalStock: (stockLevels[p.sku] ? Object.values(stockLevels[p.sku]).reduce((sum, val) => sum + val, 0) : 0)
+    }));
+  }, [products, stockLevels]);
 
   const filteredProducts = useMemo(() => {
-    let currentProducts = products;
+    let currentProducts = productsWithStock;
     if (searchText) {
       const lowerSearch = searchText.toLowerCase();
       currentProducts = currentProducts.filter(p => 
@@ -142,7 +157,7 @@ const ProductsPage = () => {
       );
     }
     return currentProducts;
-  }, [products, searchText, activeFilters]);
+  }, [productsWithStock, searchText, activeFilters]);
 
   const categorizedFilterOptions = useMemo(() => {
     if (!lookups) return [];
@@ -158,12 +173,12 @@ const ProductsPage = () => {
     return (
       <div className="flex justify-end space-x-2 h-full items-center">
         <button onClick={() => navigate(`/products/details/${product.id}`)} className="text-blue-600 hover:text-blue-900 p-1" title="View Details"><ViewIcon className="w-5 h-5" /></button>
-        <button onClick={() => navigate(`/history?sku=${product.sku}`)} className="text-green-600 hover:text-green-900 p-1" title="View History"><HistoryIcon className="w-5 h-5" /></button>
+        <button onClick={() => navigate(`/products/history/${product.sku}`)} className="text-green-600 hover:text-green-900 p-1" title="View History"><HistoryIcon className="w-5 h-5" /></button>
         <button onClick={() => navigate(`/products/edit/${product.id}`)} className={`text-indigo-600 hover:text-indigo-900 p-1 ${isMutationDisabled ? disabledClass : ''}`} disabled={isMutationDisabled} title="Edit Product"><EditIcon className="w-5 h-5" /></button>
         <button onClick={() => handleDeleteProduct(product.id, product.sku)} className={`text-red-600 hover:text-red-900 p-1 ${isMutationDisabled ? disabledClass : ''}`} disabled={isMutationDisabled} title="Delete Product"><DeleteIcon className="w-5 h-5" /></button>
       </div>
     );
-  }, [isOnline, navigate]);
+  }, [isOnline, navigate, handleDeleteProduct]);
 
   const columnDefs = useMemo(() => ([
     { field: 'sku', headerName: 'SKU', minWidth: 120, filter: true },
@@ -171,6 +186,7 @@ const ProductsPage = () => {
     { field: 'brand', headerName: 'Brand', minWidth: 100, filter: true },
     { field: 'category', headerName: 'Category', minWidth: 120, filter: true },
     { field: 'description', headerName: 'Description', filter: true, flex: 3, minWidth: 200, valueFormatter: p => p.value && p.value.length > 50 ? p.value.substring(0, 50) + '...' : p.value },
+    { field: 'totalStock', headerName: 'Total Stock', filter: 'agNumberColumnFilter', width: 130, cellStyle: { textAlign: 'center' } },
     { field: 'reorderPoint', headerName: 'Reorder At', filter: 'agNumberColumnFilter', width: 120, cellStyle: { textAlign: 'center' }, cellRenderer: p => p.value ? <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">{p.value}</span> : null },
     { field: 'actions', headerName: 'Actions', cellRenderer: actionCellRenderer, sortable: false, filter: false, width: 150, minWidth: 150, pinned: 'right' }
   ]), [actionCellRenderer]);
@@ -178,7 +194,7 @@ const ProductsPage = () => {
   const defaultColDef = useMemo(() => ({ resizable: true, sortable: true, filter: true, suppressHeaderMenuButton: true, flex: 1, minWidth: 80 }), []);
 
   const exportTo = (format) => {
-    const data = filteredProducts.map(p => ({ SKU: p.sku, Model: p.model, Brand: p.brand, Category: p.category, Description: p.description, ReorderPoint: p.reorderPoint }));
+    const data = filteredProducts.map(p => ({ SKU: p.sku, Model: p.model, Brand: p.brand, Category: p.category, Description: p.description, TotalStock: p.totalStock, ReorderPoint: p.reorderPoint }));
     if (format === 'excel') {
       const ws = XLSX.utils.json_to_sheet(data);
       const wb = XLSX.utils.book_new();
@@ -193,10 +209,10 @@ const ProductsPage = () => {
     setIsExportMenuOpen(false);
   };
 
-  if (isLoading) return <div className="p-8 text-xl text-center">Loading Products...</div>;
+  if (isLoading) return <div className="text-xl text-center">Loading Products...</div>;
 
   return (
-    <div className="p-4 bg-gray-100 min-h-screen">
+    <div>
       <h1 className="page-title">Product Management</h1>
       <div className="flex flex-wrap gap-2 mb-6">
         <button onClick={() => navigate('/products/add')} className="btn btn-primary" disabled={isMutationDisabled}>Add Product</button>
@@ -214,23 +230,40 @@ const ProductsPage = () => {
       <div className="mb-6 card">
         <OdooSearchBar lookups={lookups} searchText={searchText} setSearchText={setSearchText} activeFilters={activeFilters} onFilterToggle={(f) => setActiveFilters(p => p.some(pf => pf.key === f.key && pf.value === f.value) ? p.filter(pf => !(pf.key === f.key && pf.value === f.value)) : [...p, f])} onFilterRemove={(f) => setActiveFilters(p => p.filter(pf => !(pf.key === f.key && pf.value === f.value)))} categorizedFilterOptions={categorizedFilterOptions} />
       </div>
-      <div className="bg-white shadow overflow-hidden rounded-lg">
-        {products.length === 0 ? (
-          <p className="p-6 text-center text-gray-500">No products found. Add one to begin.</p>
-        ) : (
-          <div className="ag-theme-indigo" style={{ width: '100%', height: 600 }}>
-            <AgGridReact
-              rowData={filteredProducts}
-              columnDefs={columnDefs}
-              defaultColDef={defaultColDef}
-              pagination={true}
-              paginationPageSize={25}
-              paginationPageSizeSelector={[10, 25, 50, 100]}
-              rowSelection={{ mode: 'multiRow' }} // <-- FIX APPLIED
-            />
+
+      {filteredProducts.length === 0 ? (
+          <div className="card text-center p-6">
+              <p className="text-gray-500">No products found that match your criteria.</p>
+              {products.length === 0 && (
+                   <button onClick={() => navigate('/products/add')} className="btn btn-primary mt-4" disabled={isMutationDisabled}>Add Your First Product</button>
+              )}
           </div>
-        )}
-      </div>
+      ) : isMobile ? (
+          <div>
+              {filteredProducts.map(product => (
+                  <ProductCard 
+                    key={product.id} 
+                    product={product} 
+                    onDelete={handleDeleteProduct}
+                    isMutationDisabled={isMutationDisabled}
+                  />
+              ))}
+          </div>
+      ) : (
+          <div className="bg-white shadow overflow-hidden rounded-lg">
+            <div className="ag-theme-indigo" style={{ width: '100%', height: 600 }}>
+                <AgGridReact
+                    rowData={filteredProducts}
+                    columnDefs={columnDefs}
+                    defaultColDef={defaultColDef}
+                    pagination={true}
+                    paginationPageSize={25}
+                    paginationPageSizeSelector={[10, 25, 50, 100]}
+                    rowSelection={{ mode: 'multiRow' }}
+                />
+            </div>
+          </div>
+      )}
     </div>
   );
 };

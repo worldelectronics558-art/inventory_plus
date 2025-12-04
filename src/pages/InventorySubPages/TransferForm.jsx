@@ -173,7 +173,7 @@ const TransferForm = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!currentUser || !auth.currentUser) {
+        if (!auth.currentUser || !currentUser) { // Updated condition
             alert('User data is not loaded yet. Please try again in a moment.');
             return;
         }
@@ -203,7 +203,7 @@ const TransferForm = () => {
                     toLocation: item.toLocation.value,
                     quantity: item.quantity,
                 })),
-            }, auth.currentUser);
+            }, auth.currentUser.uid, currentUser.displayName || currentUser.email || auth.currentUser.email || 'System'); // Updated arguments
             alert('Transfer transaction recorded successfully!');
             await formStateStore.removeItem(FORM_STATE_KEYS.TRANSFER);
             navigate('/inventory');
@@ -261,7 +261,7 @@ const TransferForm = () => {
     return (
         <>
             <AddLocationModal isOpen={isAddLocationModalOpen} onClose={() => setAddLocationModalOpen(false)} />
-            <div className="min-h-screen bg-gray-100 p-4">
+            <div className="min-h-screen bg-gray-100">
                 <div className="max-w-6xl mx-auto bg-white rounded-lg shadow-md p-6">
                     <div className="flex justify-between items-center mb-6">
                         <h1 className="text-2xl font-bold">Transfer</h1>
@@ -339,7 +339,7 @@ const TransferForm = () => {
                                         </div>
                                     )}
                                 </div>
-                                <button type="submit" className="btn btn-secondary" disabled={!currentUser}>Commit Transfer</button>
+                                <button type="submit" className="btn btn-secondary" disabled={!auth.currentUser}>Commit Transfer</button>
                             </div>
                         </div>
                     </form>

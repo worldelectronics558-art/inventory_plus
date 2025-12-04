@@ -191,8 +191,9 @@ const StockInForm = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!currentUser || !auth.currentUser) {
-            alert('User data is not loaded yet. Please try again in a moment.');
+        // Check for the Firebase auth user object (for UID) and the Firestore user profile (for displayName)
+        if (!auth.currentUser || !currentUser) {
+            alert('User authentication or profile data is not loaded yet. Please try again in a moment.');
             return;
         }
         if (items.some(item => !item.sku || !item.location || !item.reason || item.quantity <= 0)) {
@@ -213,7 +214,10 @@ const StockInForm = () => {
                     quantity: item.quantity,
                     reason: item.reason.value,
                 })),
-            }, auth.currentUser);
+            }, 
+            auth.currentUser.uid, // firebaseUserId
+            currentUser.displayName || currentUser.email || auth.currentUser.email || 'System' // userNameForLog
+            );
             alert('Stock In transaction recorded successfully!');
             await formStateStore.removeItem(FORM_STATE_KEYS.STOCK_IN);
             navigate('/inventory');
@@ -250,7 +254,7 @@ const StockInForm = () => {
         if (format === 'excel') {
             const ws = XLSX.utils.json_to_sheet(exportData);
             const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, 'Pending_Stock_In_Items');
+                XLSX.utils.book_append_sheet(wb, ws, 'Pending_Stock_In_Items');
             commonExport(wb, null);
         } else if (format === 'pdf') {
             const doc = new jsPDF();
@@ -271,7 +275,7 @@ const StockInForm = () => {
     return (
         <>
             <AddLocationModal isOpen={isAddLocationModalOpen} onClose={() => setAddLocationModalOpen(false)} />
-            <div className="min-h-screen bg-gray-100 p-4">
+            <div className="min-h-screen bg-gray-100">
                 <div className="max-w-6xl mx-auto bg-white rounded-lg shadow-md p-6">
                     <div className="flex justify-between items-center mb-6">
                         <h1 className="text-2xl font-bold">Stock In</h1>
@@ -344,7 +348,7 @@ const StockInForm = () => {
                                         </div>
                                     )}
                                 </div>
-                                <button type="submit" className="btn btn-primary" disabled={!currentUser}>Commit Stock In</button>
+                                <button type="submit" className="btn btn-primary" disabled={!auth.currentUser}>Commit Stock In</button>
                             </div>
                         </div>
                     </form>

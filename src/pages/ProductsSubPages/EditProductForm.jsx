@@ -131,7 +131,7 @@ const EditProductForm = () => {
     }
 
     return (
-        <div className="min-h-screen bg-gray-100 p-4">
+        <div className="min-h-screen bg-gray-100">
             <div className="max-w-4xl mx-auto bg-white rounded-lg shadow-md p-6">
                 {/* Header */}
                 <div className="flex justify-between items-center mb-6">

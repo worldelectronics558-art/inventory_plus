@@ -379,7 +379,7 @@ const ProductsImportForm = () => {
 
     // --- Render Logic ---
     return (
-        <div className="min-h-screen bg-gray-100 p-4">
+        <div className="min-h-screen bg-gray-100">
             {/* NEW: Render Global LoadingOverlay if global state indicates loading */}
             {/* This should ideally be in App.jsx, but if rendered here, it's only for this form's processing state */}
             {/* {status.state === 'processing' && <LoadingOverlay />} */}

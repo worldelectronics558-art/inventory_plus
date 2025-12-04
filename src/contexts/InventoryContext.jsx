@@ -9,8 +9,9 @@ import {
     doc,
     setDoc,
     serverTimestamp,
-    writeBatch,
-    getDoc
+    // writeBatch, // No longer needed for batching, as runTransaction handles atomicity per item
+    getDoc,
+    runTransaction // Import runTransaction
 } from 'firebase/firestore';
 import { format } from 'date-fns';
 
@@ -108,166 +109,173 @@ export const InventoryProvider = ({ children }) => {
         });
 
         sortedTransactions.forEach(tx => {
-            if (!tx.sku || !tx.quantityAfter === undefined) return; // Skip invalid logs
-
-            if(tx.type === 'TRANSFER') {
-                if(tx.fromLocation) {
+            // For IN/OUT transactions, update stock at the specific location
+            if (tx.type === 'IN' || tx.type === 'OUT') {
+                if (tx.sku && tx.location !== undefined && tx.quantityAfter !== undefined) {
                     if (!levels[tx.sku]) levels[tx.sku] = {};
-                    levels[tx.sku][tx.fromLocation] = tx.quantityAfter;
+                    levels[tx.sku][tx.location] = tx.quantityAfter;
                 }
-                if(tx.toLocation) {
+            } else if (tx.type === 'TRANSFER') {
+                // Transfers log two entries internally now: TRANSFER_OUT and TRANSFER_IN
+                // Each log entry has its 'location' field specifying where the change occurred.
+                if (tx.sku && tx.location !== undefined && tx.quantityAfter !== undefined) {
                     if (!levels[tx.sku]) levels[tx.sku] = {};
-                    levels[tx.sku][tx.toLocation] = tx.quantityAfter; // This might need refinement based on how `quantityAfter` is defined for transfers
+                    levels[tx.sku][tx.location] = tx.quantityAfter;
                 }
-            } else if (tx.location) {
-                 if (!levels[tx.sku]) levels[tx.sku] = {};
-                 levels[tx.sku][tx.location] = tx.quantityAfter;
             }
         });
-
         return levels;
     }, [transactions]);
 
 
     // --- 3. REBUILT: Create Granular Transaction Function ---
-    const createTransaction = async (txData, currentUser) => {
+    const createTransaction = async (txData, firebaseUserId, userNameForLog) => {
         if (!isOnline) {
             throw new Error("Cannot create transaction while offline.");
         }
-        if (!txData.type || !currentUser || !Array.isArray(txData.items) || txData.items.length === 0) {
-            throw new Error("Invalid transaction data structure.");
+        if (!txData.type || !firebaseUserId || !Array.isArray(txData.items) || txData.items.length === 0) {
+            throw new Error("Invalid transaction data structure or missing user ID.");
         }
     
-        const batch = writeBatch(db);
         const txCollectionRef = getTransactionCollectionRef();
-        const timestamp = serverTimestamp();
+        const timestamp = serverTimestamp(); // Use server timestamp for consistency
+        const dateStr = format(new Date(), 'yyyyMMddHHmmss'); // Client-side timestamp for ref number
     
-        const transactionId = doc(collection(db, 'noop')).id;
-        const userRef = generateUserRef(currentUser);
-        const dateStr = format(new Date(), 'yyyyMMddHHmmss');
-        const referenceNumber = `${userRef}-${txData.type}-${dateStr}`;
-    
-        try {
-            for (const [index, item] of txData.items.entries()) {
-                const { sku, quantity, productName } = item;
-                const newLogRef = doc(txCollectionRef);
-    
-                // Common data for all transaction types
-                const commonLogData = {
-                    transactionId,
-                    referenceNumber,
-                    itemIndex: index + 1,
-                    timestamp,
-                    sku,
-                    quantityChange: quantity,
-                    userId: currentUser.uid,
-                    userName: currentUser.displayName,
-                    productName: productName || '',
-                    reason: item.reason || null,
-                    notes: txData.notes || null,
-                    documentNumber: txData.documentNumber || null,
-                };
-    
-                if (txData.type === 'IN') {
-                    const { location } = item;
-                    if (!sku || !location || !quantity) throw new Error('Invalid Stock-In item data.');
-    
-                    const invDocRef = getInventoryDocRef(sku, location);
-                    const invDoc = await getDoc(invDocRef);
-                    const quantityBefore = invDoc.exists() ? invDoc.data().quantity || 0 : 0;
-                    const quantityAfter = quantityBefore + quantity;
-    
-                    batch.set(invDocRef, { sku, location, quantity: quantityAfter, lastUpdated: timestamp });
-                    batch.set(newLogRef, {
-                        ...commonLogData,
-                        type: 'IN',
-                        quantityBefore,
-                        quantityAfter,
-                        location,
-                        fromLocation: null,
-                        toLocation: null,
-                    });
-    
-                } else if (txData.type === 'OUT') {
-                    const { location } = item;
-                    if (!sku || !location || !quantity) throw new Error('Invalid Stock-Out item data.');
-    
-                    const invDocRef = getInventoryDocRef(sku, location);
-                    const invDoc = await getDoc(invDocRef);
-                    const quantityBefore = invDoc.exists() ? invDoc.data().quantity || 0 : 0;
-    
-                    if (quantityBefore < quantity) {
-                        throw new Error(`Insufficient stock for ${sku} at ${location}.`);
+        const userRefPrefix = (userNameForLog && userNameForLog.length > 0) 
+            ? userNameForLog.replace(/[^a-zA-Z0-9]/g, '').substring(0, 5).toUpperCase().padEnd(5, 'X')
+            : 'SYSTM';
+
+        const referenceNumber = `${userRefPrefix}-${txData.type}-${dateStr}`;
+
+        const transactionPromises = txData.items.map(async (item, index) => {
+            const { sku, quantity, productName } = item;
+            const itemTransactionId = doc(collection(db, 'noop')).id; // Unique ID for each item's operation
+
+            const commonLogData = {
+                transactionId: itemTransactionId, // Each item operation gets its own transactionId here
+                referenceNumber,
+                itemIndex: index + 1,
+                timestamp,
+                sku,
+                quantityChange: quantity,
+                userId: firebaseUserId,
+                userName: userNameForLog,
+                productName: productName || '',
+                reason: item.reason || null,
+                notes: txData.notes || null,
+                documentNumber: txData.documentNumber || null,
+            };
+
+            try {
+                await runTransaction(db, async (firestoreTransaction) => {
+                    if (txData.type === 'IN') {
+                        const { location } = item;
+                        if (!sku || !location || !quantity) throw new Error('Invalid Stock-In item data.');
+        
+                        const invDocRef = getInventoryDocRef(sku, location);
+                        const invDoc = await firestoreTransaction.get(invDocRef);
+                        const quantityBefore = invDoc.exists() ? invDoc.data().quantity || 0 : 0;
+                        const quantityAfter = quantityBefore + quantity;
+        
+                        firestoreTransaction.set(invDocRef, { sku, location, quantity: quantityAfter, lastUpdated: timestamp });
+                        firestoreTransaction.set(doc(txCollectionRef), {
+                            ...commonLogData,
+                            type: 'IN', // Log type for display
+                            quantityBefore,
+                            quantityAfter,
+                            location, // Specific location for IN
+                            fromLocation: null,
+                            toLocation: null,
+                        });
+        
+                    } else if (txData.type === 'OUT') {
+                        const { location } = item;
+                        if (!sku || !location || !quantity) throw new Error('Invalid Stock-Out item data.');
+        
+                        const invDocRef = getInventoryDocRef(sku, location);
+                        const invDoc = await firestoreTransaction.get(invDocRef);
+                        const quantityBefore = invDoc.exists() ? invDoc.data().quantity || 0 : 0;
+        
+                        if (quantityBefore < quantity) {
+                            throw new Error(`Insufficient stock for ${sku} at ${location}. Available: ${quantityBefore}, Requested: ${quantity}`);
+                        }
+                        const quantityAfter = quantityBefore - quantity;
+        
+                        firestoreTransaction.set(invDocRef, { sku, location, quantity: quantityAfter, lastUpdated: timestamp });
+                        firestoreTransaction.set(doc(txCollectionRef), {
+                            ...commonLogData,
+                            type: 'OUT', // Log type for display
+                            quantityBefore,
+                            quantityAfter,
+                            location, // Specific location for OUT
+                            fromLocation: null,
+                            toLocation: null,
+                        });
+        
+                    } else if (txData.type === 'TRANSFER') {
+                        const { fromLocation, toLocation } = item;
+                        if (!sku || !fromLocation || !toLocation || !quantity) throw new Error('Invalid Transfer item data.');
+        
+                        // Read both documents within the same transaction
+                        const fromDocRef = getInventoryDocRef(sku, fromLocation);
+                        const toDocRef = getInventoryDocRef(sku, toLocation);
+        
+                        const fromDoc = await firestoreTransaction.get(fromDocRef);
+                        const toDoc = await firestoreTransaction.get(toDocRef);
+        
+                        const fromQtyBefore = fromDoc.exists() ? fromDoc.data().quantity || 0 : 0;
+                        if (fromQtyBefore < quantity) {
+                            throw new Error(`Insufficient stock for ${sku} at ${fromLocation}. Available: ${fromQtyBefore}, Requested: ${quantity}`);
+                        }
+                        const fromQtyAfter = fromQtyBefore - quantity;
+        
+                        const toQtyBefore = toDoc.exists() ? toDoc.data().quantity || 0 : 0;
+                        const toQtyAfter = toQtyBefore + quantity;
+        
+                        // Update both documents within the same transaction
+                        firestoreTransaction.set(fromDocRef, { sku, location: fromLocation, quantity: fromQtyAfter, lastUpdated: timestamp });
+                        firestoreTransaction.set(toDocRef, { sku, location: toLocation, quantity: toQtyAfter, lastUpdated: timestamp });
+        
+                        // Log for "OUT" part of the transfer
+                        firestoreTransaction.set(doc(txCollectionRef), {
+                            ...commonLogData,
+                            type: 'TRANSFER', // Log as TRANSFER
+                            quantityBefore: fromQtyBefore,
+                            quantityAfter: fromQtyAfter,
+                            location: fromLocation, // Log the specific location for this leg (OUT)
+                            fromLocation,
+                            toLocation,
+                        });
+        
+                        // Log for "IN" part of the transfer
+                        firestoreTransaction.set(doc(txCollectionRef), {
+                            ...commonLogData,
+                            type: 'TRANSFER', // Log as TRANSFER
+                            quantityBefore: toQtyBefore,
+                            quantityAfter: toQtyAfter,
+                            location: toLocation, // Log the specific location for this leg (IN)
+                            fromLocation,
+                            toLocation,
+                        });
                     }
-                    const quantityAfter = quantityBefore - quantity;
-    
-                    batch.set(invDocRef, { sku, location, quantity: quantityAfter, lastUpdated: timestamp });
-                    batch.set(newLogRef, {
-                        ...commonLogData,
-                        type: 'OUT',
-                        quantityBefore,
-                        quantityAfter,
-                        location,
-                        fromLocation: null,
-                        toLocation: null,
-                    });
-    
-                } else if (txData.type === 'TRANSFER') {
-                    const { fromLocation, toLocation } = item;
-                    if (!sku || !fromLocation || !toLocation || !quantity) throw new Error('Invalid Transfer item data.');
-    
-                    // From Location
-                    const fromDocRef = getInventoryDocRef(sku, fromLocation);
-                    const fromDoc = await getDoc(fromDocRef);
-                    const fromQtyBefore = fromDoc.exists() ? fromDoc.data().quantity : 0;
-                    if (fromQtyBefore < quantity) throw new Error(`Insufficient stock for ${sku} at ${fromLocation}.`);
-                    const fromQtyAfter = fromQtyBefore - quantity;
-                    batch.set(fromDocRef, { sku, location: fromLocation, quantity: fromQtyAfter, lastUpdated: timestamp });
-    
-                    // To Location
-                    const toDocRef = getInventoryDocRef(sku, toLocation);
-                    const toDoc = await getDoc(toDocRef);
-                    const toQtyBefore = toDoc.exists() ? toDoc.data().quantity : 0;
-                    const toQtyAfter = toQtyBefore + quantity;
-                    batch.set(toDocRef, { sku, location: toLocation, quantity: toQtyAfter, lastUpdated: timestamp });
-    
-                    // Log for "OUT" part
-                    const transferLogRefOut = doc(txCollectionRef);
-                    batch.set(transferLogRefOut, {
-                        ...commonLogData,
-                        type: 'TRANSFER',
-                        quantityBefore: fromQtyBefore,
-                        quantityAfter: fromQtyAfter,
-                        location: null,
-                        fromLocation,
-                        toLocation,
-                    });
-    
-                    // Log for "IN" part
-                    const transferLogRefInt = doc(txCollectionRef);
-                    batch.set(transferLogRefInt, {
-                        ...commonLogData,
-                        type: 'TRANSFER',
-                        quantityBefore: toQtyBefore,
-                        quantityAfter: toQtyAfter,
-                        location: null,
-                        fromLocation,
-                        toLocation,
-                    });
+                }); // End of runTransaction for an item
+            } catch (error) {
+                if (error.message.includes('Insufficient stock')) {
+                    console.warn(`Transaction failed for item ${sku} due to: ${error.message}`);
+                    throw error; // Re-throw to propagate the specific error up
+                } else {
+                    console.error("Firestore transaction failed unexpectedly:", error);
+                    throw new Error(`Error processing item ${sku}: ${error.message}`); // Wrap and re-throw
                 }
             }
+        }); // End of map over txData.items
     
-            await batch.commit();
-            console.log(`Transaction ${referenceNumber} committed with granular logs.`);
-            return referenceNumber;
-    
-        } catch (error) {
-            console.error("Error creating granular transaction:", error);
-            throw error;
-        }
+        await Promise.all(transactionPromises);
+        console.log(`All items for transaction ${referenceNumber} committed with granular logs.`);
+        return referenceNumber; // Return the overall reference number
     };
-
-
+    
+    
     const contextValue = {
         transactions,
         stockLevels,

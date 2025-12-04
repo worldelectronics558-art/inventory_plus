@@ -1,6 +1,6 @@
 // src/App.jsx
 
-import React, { useState} from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Routes, Route } from 'react-router-dom';
 
 // Providers
@@ -11,11 +11,11 @@ import { useInventory } from './contexts/InventoryContext.jsx';
 import { LocationProvider } from './contexts/LocationContext.jsx';
 import { useLoading } from './contexts/LoadingContext';
 import LoadingOverlay from './components/LoadingOverlay';
-import MainLoadingOverlay from './components/MainLoadingOverlay'
+import MainLoadingOverlay from './components/MainLoadingOverlay';
 
 // Components & Pages
 import Sidebar from './components/Sidebar.jsx';
-import Header from './components/Header.jsx'; 
+import Header from './components/Header.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
 import ProductsPage from './pages/ProductsPage.jsx';
 import InventoryPage from './pages/InventoryPage.jsx';
@@ -24,15 +24,30 @@ import SettingsPage from './pages/SettingsPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 
 // Products Sub-Pages
-import AddProductForm from './pages/ProductsSubPages/AddProductForm.jsx'; 
+import AddProductForm from './pages/ProductsSubPages/AddProductForm.jsx';
 import EditProductForm from './pages/ProductsSubPages/EditProductForm.jsx';
 import ProductsImportForm from './pages/ProductsSubPages/ProductsImportForm.jsx';
-import ProductDetailsPage from './pages/ProductsSubPages/ProductDetailsPage.jsx'; // <-- IMPORT ADDED
+import ProductDetailsPage from './pages/ProductsSubPages/ProductDetailsPage.jsx';
+import ProductHistoryPage from './pages/ProductsSubPages/ProductHistoryPage.jsx';
 
 // Inventory Sub-Pages
 import StockInForm from './pages/InventorySubPages/StockInForm.jsx';
 import StockOutForm from './pages/InventorySubPages/StockOutForm.jsx';
 import TransferForm from './pages/InventorySubPages/TransferForm.jsx';
+
+// Custom hook to check screen size
+const useMediaQuery = (query) => {
+    const [matches, setMatches] = useState(window.matchMedia(query).matches);
+
+    useEffect(() => {
+        const media = window.matchMedia(query);
+        const listener = () => setMatches(media.matches);
+        media.addEventListener('change', listener);
+        return () => media.removeEventListener('change', listener);
+    }, [query]);
+
+    return matches;
+};
 
 // Placeholder Pages for now
 const ReportsPage = () => <div className="p-8">Placeholder for Reports</div>;
@@ -41,13 +56,36 @@ const ReportsPage = () => <div className="p-8">Placeholder for Reports</div>;
 const AppContent = () => {
     const [showConnectionModal, setShowConnectionModal] = useState(false);
     
+    // --- RESPONSIVE STATE MANAGEMENT ---
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+    const [isMobileMenuOpen, setMobileMenuOpen] = useState(false);
+    
+    // md breakpoint is 768px
+    const isDesktop = useMediaQuery('(min-width: 768px)');
 
-    const toggleSidebar = () => { 
+    const toggleSidebarCollapse = useCallback(() => {
         setIsSidebarCollapsed(prev => !prev);
-    };
+    }, []);
 
-    const mainContentClass = isSidebarCollapsed ? 'md:ml-16' : 'md:ml-64';
+    const openMobileMenu = useCallback(() => {
+        setMobileMenuOpen(true);
+    }, []);
+
+    const closeMobileMenu = useCallback(() => {
+        setMobileMenuOpen(false);
+    }, []);
+
+    // Close mobile menu on resize to desktop view
+    useEffect(() => {
+        if (isDesktop) {
+            setMobileMenuOpen(false);
+        }
+    }, [isDesktop]);
+    
+    // --- END: RESPONSIVE STATE ---
+
+    // Define content margin based on sidebar state and screen size
+    const mainContentClass = isDesktop ? (isSidebarCollapsed ? 'md:ml-16' : 'md:ml-64') : 'ml-0';
 
     const { isAuthenticated: isAuthContextAuthenticated, authReady } = useAuth();
     const { userPermissions, isLoading: isUserLoading } = useUser();
@@ -78,24 +116,31 @@ const AppContent = () => {
     
     return (
         <LocationProvider>
-            <div className="flex min-h-screen bg-gray-100">
+            {/* The root div no longer uses flexbox for the main layout */}
+            <div className="min-h-screen bg-gray-100">
                 <Sidebar
                     isCollapsed={isSidebarCollapsed}
-                    toggleSidebar={toggleSidebar}
+                    isDesktop={isDesktop}
+                    isMobileMenuOpen={isMobileMenuOpen}
+                    onCloseMobileMenu={closeMobileMenu} // Pass the close function
                 />
                 <Header 
                     isSidebarCollapsed={isSidebarCollapsed}
-                    toggleSidebar={toggleSidebar}
+                    isDesktop={isDesktop}
+                    onToggleCollapse={toggleSidebarCollapse}
+                    onOpenMobileMenu={openMobileMenu}
                 />
                 {isAppProcessing && <LoadingOverlay />}
-                <main className={`flex-1 transition-all duration-300 ${mainContentClass} mt-16 p-6 overflow-hidden`}>
+                {/* The main content area is now a direct child with responsive margin */}
+                <main className={`flex-1 transition-all duration-300 ${mainContentClass} mt-16 p-3 md:p-6 overflow-hidden`}>
                     <Routes>
                         <Route path="/" element={<DashboardPage />} />
                         <Route path="/products" element={<ProductsPage />} />
                         <Route path="/products/add" element={<AddProductForm />} /> 
                         <Route path="/products/bulk-import" element={<ProductsImportForm />} /> 
                         <Route path="/products/edit/:id" element={<EditProductForm />} />
-                        <Route path="/products/details/:id" element={<ProductDetailsPage />} /> {/* <-- ROUTE ADDED */}
+                        <Route path="/products/details/:id" element={<ProductDetailsPage />} />
+                        <Route path="/products/history/:sku" element={<ProductHistoryPage />} />
                         <Route path="/inventory" element={<InventoryPage />} />
                         <Route path="/inventory/stock-in" element={<StockInForm />} />
                         <Route path="/inventory/stock-out" element={<StockOutForm />} />

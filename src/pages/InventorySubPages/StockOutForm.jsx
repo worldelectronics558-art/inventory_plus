@@ -190,7 +190,8 @@ const StockOutForm = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!currentUser || !auth.currentUser) {
+        // Corrected user check to ensure Firebase auth user and Firestore profile are loaded
+        if (!auth.currentUser || !currentUser) { 
             alert('User data is not loaded yet. Please try again in a moment.');
             return;
         }
@@ -220,7 +221,10 @@ const StockOutForm = () => {
                     quantity: item.quantity,
                     reason: item.reason.value,
                 })),
-            }, auth.currentUser);
+            }, 
+            auth.currentUser.uid, // Pass Firebase UID
+            currentUser.displayName || currentUser.email || auth.currentUser.email || 'System' // Pass display name with fallbacks
+            );
             alert('Stock Out transaction recorded successfully!');
             await formStateStore.removeItem(FORM_STATE_KEYS.STOCK_OUT);
             navigate('/inventory');
@@ -278,7 +282,7 @@ const StockOutForm = () => {
     return (
         <>
             <AddLocationModal isOpen={isAddLocationModalOpen} onClose={() => setAddLocationModalOpen(false)} />
-            <div className="min-h-screen bg-gray-100 p-4">
+            <div className="min-h-screen bg-gray-100">
                 <div className="max-w-6xl mx-auto bg-white rounded-lg shadow-md p-6">
                     <div className="flex justify-between items-center mb-6">
                         <h1 className="text-2xl font-bold">Stock Out</h1>
@@ -304,7 +308,7 @@ const StockOutForm = () => {
                         </div>
                         <div>
                             <label className="block text-sm font-medium mb-1">Notes</label>
-                            <textarea value={notes} onChange={(e) => setNotes(e.targe.value)} rows="2" className="input-base" />
+                            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows="2" className="input-base" />
                         </div>
                         <div className="border rounded-lg overflow-hidden">
                             <table className="table-base w-full" style={{borderCollapse: 'separate', borderSpacing: '0.5rem'}}>
@@ -351,7 +355,7 @@ const StockOutForm = () => {
                                         </div>
                                     )}
                                 </div>
-                                <button type="submit" className="btn btn-danger" disabled={!currentUser}>Commit Stock Out</button>
+                                <button type="submit" className="btn btn-danger" disabled={!auth.currentUser}>Commit Stock Out</button>
                             </div>
                         </div>
                     </form>

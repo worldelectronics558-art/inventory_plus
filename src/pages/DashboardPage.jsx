@@ -29,7 +29,7 @@ const DashboardPage = () => {
     };
 
     return (
-        <div className="p-8">
+        <div className="min-h-screen bg-gray-100">
             <h1 className="text-3xl font-bold mb-6 text-gray-800">👋 Welcome to InventoryPlus Dashboard (PLACEHOLDER)</h1>
             <p className="text-gray-600 mb-4">
                 This is the main overview of inventory metrics.
