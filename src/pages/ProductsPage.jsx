@@ -1,3 +1,4 @@
+
 // src/pages/ProductsPage.jsx
 
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
@@ -60,12 +61,22 @@ const OdooSearchBar = ({ searchText, setSearchText, activeFilters, onFilterToggl
     if (!activeFilters.some(f => f.key === filterOption.key && f.value === filterOption.value)) {
       onFilterToggle(filterOption);
     }
-    if (inputRef.current) inputRef.current.focus();
+    // Keep menu open for multiple filter selections
+  };
+  
+  const handleKeyDown = (event) => {
+    if (event.key === 'Enter') {
+      setIsMenuOpen(false);
+      inputRef.current.blur(); // Remove focus from the input field
+    }
   };
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (searchRef.current && !searchRef.current.contains(event.target)) setIsMenuOpen(false);
+      // Close only if clicking outside the search bar and filter menu container
+      if (searchRef.current && !searchRef.current.contains(event.target)) {
+        setIsMenuOpen(false);
+      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -85,19 +96,49 @@ const OdooSearchBar = ({ searchText, setSearchText, activeFilters, onFilterToggl
         ))}
       </div>
       <div className="relative rounded-md shadow-sm">
-        <input type="text" ref={inputRef} value={searchText} onChange={(e) => setSearchText(e.target.value)} onFocus={() => setIsMenuOpen(true)} placeholder="Search SKU, Model, Brand, Category..." className="input-base" />
-        <div className="absolute inset-y-0 right-0 flex items-center pr-3">
-          <svg className="h-5 w-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" /></svg>
+        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <svg className="h-5 w-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" /></svg>
+        </div>
+        <input 
+            type="text" 
+            ref={inputRef} 
+            value={searchText} 
+            onChange={(e) => setSearchText(e.target.value)} 
+            onFocus={() => setIsMenuOpen(true)} // Open menu on focus
+            onKeyDown={handleKeyDown}
+            placeholder="Search SKU, Model..." 
+            className="input-base pl-10 pr-10" // Adjusted padding for icons
+        />
+        <div className="absolute inset-y-0 right-0 flex items-center">
+            <button 
+                type="button"
+                onClick={() => setIsMenuOpen(!isMenuOpen)} // Toggle menu with filter button
+                className="h-full px-3 text-gray-500 hover:text-gray-700 focus:outline-none"
+                aria-label="Toggle filters"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L16 11.414V17l-4 4v-9.586L4.293 6.707A1 1 0 014 6V4z" /></svg>
+            </button>
         </div>
       </div>
       {isMenuOpen && (
         <div className="absolute z-10 mt-1 w-full rounded-md bg-white shadow-lg overflow-hidden border border-gray-200">
+           <div className="flex justify-between items-center bg-gray-50 p-2 border-b">
+                <h3 className="text-sm font-semibold text-gray-700 px-2">Filters</h3>
+                <button 
+                    type="button" 
+                    onClick={() => setIsMenuOpen(false)} // Close menu with X button
+                    className="p-1 rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-600"
+                    aria-label="Close filters"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+            </div>
           <div className="max-h-60 overflow-y-auto">
             {categorizedFilterOptions.filter(g => g.options.length > 0).length > 0 ? (
               categorizedFilterOptions.map(group => (
                 group.options.length > 0 && (
                   <div key={group.key} className="border-b border-gray-100 py-3 last:border-b-0">
-                    <h3 className="text-xs font-bold uppercase text-indigo-700 mb-2 px-4">{group.label} Filters</h3>
+                    <h3 className="text-xs font-bold uppercase text-indigo-700 mb-2 px-4">{group.label}</h3>
                     <div className="flex flex-wrap gap-2 px-4">
                       {group.options.map((option, index) => (
                         <button key={index} type="button" onClick={() => handleMenuClick(option)} className={`px-3 py-1 text-sm rounded-full ${activeFilters.some(f => f.key === option.key && f.value === option.value) ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-800 hover:bg-gray-200'}`}>
