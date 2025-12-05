@@ -1,28 +1,28 @@
+
 // src/components/Sidebar.jsx
 
 import React, { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useUser } from '../contexts/UserContext.jsx';
-import { Cloud, CloudOff, LayoutDashboard, Package, Warehouse, Users, Settings, LogOut, X, History } from 'lucide-react';
+import { Cloud, CloudOff, ChevronRight, LayoutDashboard, Package, Warehouse, Users, Settings, LogOut, X, History, ShoppingCart, Truck } from 'lucide-react';
 
 const navItems = [
     { name: 'Dashboard', icon: LayoutDashboard, route: '/' },
     { name: 'Products', icon: Package, route: '/products', permission: 'canViewProducts' },
     { name: 'Inventory', icon: Warehouse, route: '/inventory', permission: 'canViewInventory' },
+    {
+        name: 'Purchasing', icon: Truck, permission: 'canViewPurchasing', subItems: [
+            { name: 'Purchase Invoices', route: '/purchasing' },
+            { name: 'Suppliers', route: '/purchasing/suppliers' },
+        ]
+    },
+    { name: 'Sales', icon: ShoppingCart, route: '/sales', permission: 'canViewSales' },
+    { name: 'Customers', icon: Users, route: '/customers', permission: 'canViewCustomers' },
     { name: 'History', icon: History, route: '/history' },
-    { name: 'Settings', icon: Settings, route: '/settings' },
+    { name: 'Settings', icon: Settings, route: './settings' },
 ];
 
-/**
- * Renders the responsive main application sidebar.
- *
- * @param {object} props
- * @param {boolean} props.isCollapsed - Whether the sidebar is collapsed on desktop.
- * @param {boolean} props.isDesktop - Whether the view is currently desktop size.
- * @param {boolean} props.isMobileMenuOpen - Whether the sidebar should be visible on mobile.
- * @param {function} props.onCloseMobileMenu - Function to close the mobile menu.
- */
 const Sidebar = ({ isCollapsed, isDesktop, isMobileMenuOpen, onCloseMobileMenu }) => {
     const navigate = useNavigate();
     const location = useLocation();
@@ -30,12 +30,13 @@ const Sidebar = ({ isCollapsed, isDesktop, isMobileMenuOpen, onCloseMobileMenu }
     const { userPermissions } = useUser();
     const { isOnline, isNetworkAvailable, goOnline, goOffline, signOut, isAuthenticated } = useAuth();
     const [connectionError, setConnectionError] = useState('');
+    const [openSubmenu, setOpenSubmenu] = useState(null);
 
     const handleConnectionClick = async () => {
         if (!isAuthenticated) return;
         setConnectionError('');
         if (isOnline) {
-            if (window.confirm("Are you sure you want to switch to OFFLINE mode? This will stop live sync.")) {
+            if (window.confirm("Are you sure you want to switch to OFFLINE mode?")) {
                 goOffline();
             }
         } else {
@@ -50,31 +51,31 @@ const Sidebar = ({ isCollapsed, isDesktop, isMobileMenuOpen, onCloseMobileMenu }
     const handleNavigate = (route) => {
         navigate(route);
         if (!isDesktop) {
-            onCloseMobileMenu(); // Close mobile menu on navigation
+            onCloseMobileMenu();
         }
     };
 
-    const navLinkClass = (route) => {
-        const isActive = location.pathname === route || (route === '/' && location.pathname === '/dashboard');
-        const baseClasses = `sidebar-link ${isActive ? 'active' : ''}`;
-        // On mobile, the sidebar is never collapsed, so we don't need collapsed styles.
+    const toggleSubmenu = (itemName) => {
+        setOpenSubmenu(openSubmenu === itemName ? null : itemName);
+    };
+
+    const navLinkClass = (route, isSub = false) => {
+        const isActive = location.pathname === route || (route !== '/' && location.pathname.startsWith(route));
+        const baseClasses = `sidebar-link ${isActive ? 'active' : ''} ${isSub ? 'pl-12' : ''}`;
         const displayClasses = (isDesktop && isCollapsed) ? 'justify-center w-12 mx-auto' : 'w-full';
         return `${baseClasses} ${displayClasses}`;
     };
 
-    // Determine sidebar visibility and style based on screen size and state
     const sidebarClasses = `
-        fixed top-0 left-0 h-full z-40 bg-gray-900 shadow-xl flex flex-col transition-transform duration-300 ease-in-out
+        fixed top-0 left-0 h-full z-40 sidebar-gradient shadow-xl flex flex-col transition-transform duration-300 ease-in-out
         ${isDesktop ? (isCollapsed ? 'w-16' : 'w-64') : 'w-64'}
         ${isDesktop ? 'translate-x-0' : (isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full')}
     `;
 
-    // Use a ternary for the final collapsed state to ensure mobile is never collapsed
     const finalIsCollapsed = isDesktop && isCollapsed;
 
     return (
         <>
-            {/* Backdrop for mobile */} 
             {!isDesktop && isMobileMenuOpen && (
                 <div 
                     className="fixed inset-0 bg-black/60 z-30" 
@@ -88,12 +89,14 @@ const Sidebar = ({ isCollapsed, isDesktop, isMobileMenuOpen, onCloseMobileMenu }
                     {finalIsCollapsed ? (
                         <img src="/src/assets/logo.svg" alt="Logo" className="w-8 h-8 rounded-full" />
                     ) : (
-                        <h1 className="text-xl font-bold text-white whitespace-nowrap">InventoryPlus</h1>
+                        <h1 className="text-xl font-bold text-white whitespace-nowrap">
+                            <span className="text-white page-title !mb-0 !text-xl">InventoryPlus</span>
+                        </h1>
                     )}
                 </div>
 
                 <div className={`p-2 ${finalIsCollapsed ? 'px-1' : ''}`}>
-                    <button
+                     <button
                         onClick={handleConnectionClick}
                         disabled={!isAuthenticated}
                         className={`flex items-center w-full py-3 text-sm rounded-lg transition-all duration-300 font-semibold text-white
@@ -105,13 +108,13 @@ const Sidebar = ({ isCollapsed, isDesktop, isMobileMenuOpen, onCloseMobileMenu }
                             {isOnline ? <Cloud className="w-4 h-4" /> : <CloudOff className="w-4 h-4" />}
                             {!finalIsCollapsed && <span className='ml-2'>Status: {isOnline ? 'Online' : 'Offline'}</span>}
                         </div>
-                        {!finalIsCollapsed && <div>{isOnline ? 'Go Offline' : (isNetworkAvailable ? 'Go Online' : 'Offline')}</div>}
+                        {!finalIsCollapsed && <div>{isOnline ? 'Go Offline' : 'Go Online'}</div>}
                     </button>
                     {connectionError && !finalIsCollapsed && (
                         <div className="mx-2 my-2 p-2 bg-red-800/90 rounded-lg shadow-inner text-white text-xs">
                             <div className="flex justify-between items-center">
-                                <span>{connectionError}</span>
                                 <button onClick={() => setConnectionError('')} className="text-gray-300 hover:text-white"><X size={14} /></button>
+                                <span>{connectionError}</span>
                             </div>
                         </div>
                     )}
@@ -119,9 +122,42 @@ const Sidebar = ({ isCollapsed, isDesktop, isMobileMenuOpen, onCloseMobileMenu }
 
                 <nav className="sidebar-nav grow p-2">
                     {navItems.map((item) => {
-                        if (item.permission && !userPermissions[item.permission]) return null;
-
+                        if (item.permission && userPermissions && !userPermissions[item.permission]) {
+                            return null;
+                        }
+                        
                         const Icon = item.icon;
+                        if (item.subItems) {
+                            const isSubmenuOpen = openSubmenu === item.name;
+                            return (
+                                <div key={item.name}>
+                                    <button
+                                        onClick={() => toggleSubmenu(item.name)}
+                                        className={`sidebar-link w-full flex justify-between items-center mb-1 group relative ${navLinkClass(item.route)}`}
+                                    >
+                                        <div className="flex items-center">
+                                            <Icon className={`w-5 h-5 ${!finalIsCollapsed ? 'mr-3' : ''}`} />
+                                            {!finalIsCollapsed && <span>{item.name}</span>}
+                                        </div>
+                                        {!finalIsCollapsed && <ChevronRight className={`w-4 h-4 transition-transform ${isSubmenuOpen ? 'rotate-90' : ''}`} />}
+                                    </button>
+                                    {isSubmenuOpen && !finalIsCollapsed && (
+                                        <div className="pl-4">
+                                            {item.subItems.map(subItem => (
+                                                <button
+                                                    key={subItem.route}
+                                                    onClick={() => handleNavigate(subItem.route)}
+                                                    className={`${navLinkClass(subItem.route, true)} mb-1 w-full text-left`}
+                                                >
+                                                    {subItem.name}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        }
+
                         return (
                             <button
                                 key={item.route}
@@ -131,7 +167,7 @@ const Sidebar = ({ isCollapsed, isDesktop, isMobileMenuOpen, onCloseMobileMenu }
                                 <Icon className={`w-5 h-5 ${!finalIsCollapsed ? 'mr-3' : ''}`} />
                                 {!finalIsCollapsed && <span>{item.name}</span>}
                                 {finalIsCollapsed && (
-                                    <span className="absolute left-full ml-4 whitespace-nowrap px-3 py-1 bg-gray-700 text-white text-sm rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-30">
+                                    <span className="absolute left-full ml-4 whitespace-nowrap px-3 py-1 bg-gray-600 text-white text-sm rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-30">
                                         {item.name}
                                     </span>
                                 )}
@@ -148,11 +184,6 @@ const Sidebar = ({ isCollapsed, isDesktop, isMobileMenuOpen, onCloseMobileMenu }
                         >
                             <LogOut className={`w-5 h-5 ${!finalIsCollapsed ? 'mr-3' : ''}`} />
                             {!finalIsCollapsed && <span>Sign Out</span>}
-                            {finalIsCollapsed && (
-                                <span className="absolute left-full ml-4 whitespace-nowrap px-3 py-1 bg-gray-700 text-white text-sm rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-30">
-                                    Sign Out
-                                </span>
-                            )}
                         </button>
                     )}
                 </div>

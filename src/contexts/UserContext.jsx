@@ -12,36 +12,48 @@ const calculatePermissions = (role, isAuthenticated) => {
             canViewInventory: false,
             canManageInventory: false,
             canManageUsers: false,
-            canViewProducts: false, // Explicitly false for guests
+            canViewProducts: false, 
             canManageProducts: false,
             canViewSettings: false,
+            canViewPurchasing: false,
+            canViewCustomers: false, // Explicitly false for guests
+            canViewSales: false, // Explicitly false for guests
         };
     }
-    // CORRECTED: Added both canViewProducts and canManageProducts
+
     const permissions = {
         admin: {
             canViewInventory: true,
             canManageInventory: true,
             canManageUsers: true,
-            canViewProducts: true,    // Can see the page
-            canManageProducts: true, // Can edit/add products
+            canViewProducts: true,
+            canManageProducts: true,
             canViewSettings: true,
+            canViewPurchasing: true,
+            canViewCustomers: true, // Correctly added permission
+            canViewSales: true, // Correctly added permission
         },
         manager: {
             canViewInventory: true,
             canManageInventory: true,
             canManageUsers: false,
-            canViewProducts: true,    // Can see the page
-            canManageProducts: true, // Can edit/add products
+            canViewProducts: true,
+            canManageProducts: true,
             canViewSettings: true,
+            canViewPurchasing: true,
+            canViewCustomers: true, // Correctly added permission
+            canViewSales: true, // Correctly added permission
         },
         viewer: {
             canViewInventory: true,
             canManageInventory: false,
             canManageUsers: false,
-            canViewProducts: true,    // Can see the page
-            canManageProducts: false, // CANNOT edit/add products
+            canViewProducts: true,
+            canManageProducts: false,
             canViewSettings: false,
+            canViewPurchasing: true,
+            canViewCustomers: true, // Correctly added permission
+            canViewSales: true, // Correctly added permission
         },
     };
     return { role, ...(permissions[role] || permissions.viewer) };

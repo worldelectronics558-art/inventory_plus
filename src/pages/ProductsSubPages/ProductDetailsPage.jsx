@@ -1,28 +1,66 @@
 
 // src/pages/ProductsSubPages/ProductDetailsPage.jsx
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-
-// Contexts & Utils
 import { useProducts } from '../../contexts/ProductContext';
 import { useInventory } from '../../contexts/InventoryContext';
 import { formatDate } from '../../utils/formatDate';
-import { processTransactions } from '../../utils/transactionUtils';
+import { Tag, Bookmark, AlignLeft, Info, Clock, Edit, MapPin, ChevronDown, ChevronRight } from 'lucide-react';
 
-// Components
-import useMediaQuery from '../../hooks/useMediaQuery';
-import TransactionCard from '../../components/TransactionCard';
-import { Tag, Bookmark, AlignLeft, Info, Clock, Edit, History, MapPin } from 'lucide-react';
+// A new component for displaying expandable location details
+const LocationInventory = ({ location, items }) => {
+    const [isOpen, setIsOpen] = useState(true);
+    const total = items.length;
+
+    return (
+        <div className="border rounded-md mb-2 bg-gray-50">
+            <button 
+                onClick={() => setIsOpen(!isOpen)}
+                className="w-full flex justify-between items-center p-3 bg-gray-100 hover:bg-gray-200"
+            >
+                <div className="flex items-center">
+                    {isOpen ? <ChevronDown size={20} className="mr-2"/> : <ChevronRight size={20} className="mr-2"/>}
+                    <span className="font-semibold text-gray-800">{location}</span>
+                </div>
+                <span className={`font-bold text-lg px-2 py-0.5 rounded ${total > 0 ? 'bg-blue-600 text-white' : 'bg-gray-300 text-gray-700'}`}>{total}</span>
+            </button>
+            {isOpen && (
+                <div className="p-2">
+                    {total > 0 ? (
+                        <table className="min-w-full text-sm mt-1">
+                            <thead>
+                                <tr>
+                                    <th className="p-2 text-left font-semibold">Serial Number</th>
+                                    <th className="p-2 text-left font-semibold">Stocked On</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200">
+                                {items.map(item => (
+                                    <tr key={item.id}>
+                                        <td className="p-2 font-mono">{item.serialNumber} {item.internalSerialNumber && <span className="text-xs text-gray-400">(auto)</span>}</td>
+                                        <td className="p-2 text-gray-600">{formatDate(item.stockInDate)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    ) : (
+                        <p className="p-4 text-center text-gray-500 italic">No items in stock at this location.</p>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+};
+
 
 const ProductDetailsPage = () => {
     const { id } = useParams();
     const navigate = useNavigate();
-    const isMobile = useMediaQuery('(max-width: 767px)');
 
-    // Data Hooks
+    // Data Hooks - Now using inventoryItems
     const { products, isLoading: isProductsLoading } = useProducts();
-    const { transactions, stockLevels, isLoading: isInventoryLoading } = useInventory();
+    const { inventoryItems, isLoading: isInventoryLoading } = useInventory();
 
     const isLoading = isProductsLoading || isInventoryLoading;
 
@@ -31,24 +69,38 @@ const ProductDetailsPage = () => {
         !isLoading ? products.find(p => p.id === id) : null
     , [id, products, isLoading]);
 
-    // Memoized Inventory & Transaction Data using Central Utility
-    const totalTransactionCount = useMemo(() => 
-        product ? transactions.filter(tx => tx.sku === product.sku).length : 0
-    , [product, transactions]);
+    // --- NEW INVENTORY DATA PROCESSING ---
+    const inventoryByLocation = useMemo(() => {
+        if (!product) return new Map();
 
-    const recentLogs = useMemo(() => {
-        if (!product) return [];
-        const processed = processTransactions({ transactions, sku: product.sku });
-        return processed.slice(0, 5);
-    }, [product, transactions]);
+        const grouped = new Map();
+        inventoryItems
+            .filter(item => item.sku === product.sku && item.status === 'in_stock')
+            .forEach(item => {
+                const location = item.location || 'Unassigned';
+                if (!grouped.has(location)) {
+                    grouped.set(location, []);
+                }
+                grouped.get(location).push(item);
+            });
+        
+        // Sort items within each location by stock-in date (FIFO)
+        for (let items of grouped.values()) {
+            items.sort((a, b) => (a.stockInDate?.toDate() || 0) - (b.stockInDate?.toDate() || 0));
+        }
 
-    const currentInventoryByLocation = useMemo(() => 
-        product && stockLevels[product.sku] ? Object.entries(stockLevels[product.sku]) : []
-    , [product, stockLevels]);
+        return grouped;
+    }, [product, inventoryItems]);
+
+    const totalInventory = useMemo(() => {
+        let count = 0;
+        for (let items of inventoryByLocation.values()) {
+            count += items.length;
+        }
+        return count;
+    }, [inventoryByLocation]);
     
-    const totalInventory = useMemo(() => 
-        currentInventoryByLocation.reduce((sum, [, quantity]) => sum + quantity, 0)
-    , [currentInventoryByLocation]);
+    // --- END NEW INVENTORY PROCESSING ---
 
     if (isLoading) {
         return <div className="p-8 text-center text-xl">Loading Product Details...</div>;
@@ -66,11 +118,16 @@ const ProductDetailsPage = () => {
 
     return (
         <div>
-            {/* --- Header --- */}
+            {/* --- Header (includes new isSerialized flag) --- */}
             <div className="flex justify-between items-center mb-6">
                 <div>
                     <h1 className="page-title">{product.model}</h1>
-                    <p className="font-mono text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded inline-block">SKU: {product.sku}</p>
+                    <div className="flex items-center gap-4">
+                        <p className="font-mono text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded inline-block">SKU: {product.sku}</p>
+                        <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${product.isSerialized ?? true ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                            {product.isSerialized ?? true ? 'Serialized' : 'Non-Serialized'}
+                        </span>
+                    </div>
                 </div>
                 <div className="flex space-x-2">
                     <button onClick={() => navigate(`/products/edit/${product.id}`)} className="btn btn-secondary"><Edit size={16} className="mr-2"/>Edit</button>
@@ -78,9 +135,9 @@ const ProductDetailsPage = () => {
                 </div>
             </div>
 
-            {/* --- Basic Information Card --- */}
+            {/* --- Basic Information Card (Unchanged) --- */}
             <div className="card mb-6">
-                <h2 className="section-title">Basic Information</h2>
+                 <h2 className="section-title">Basic Information</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
                     <div className="flex items-center"><Bookmark size={16} className="mr-3 text-primary-600"/><strong>Brand:</strong><span className="ml-2">{product.brand || 'N/A'}</span></div>
                     <div className="flex items-center"><Tag size={16} className="mr-3 text-primary-600"/><strong>Category:</strong><span className="ml-2">{product.category || 'N/A'}</span></div>
@@ -90,67 +147,25 @@ const ProductDetailsPage = () => {
                 </div>
             </div>
 
-            {/* --- Inventory Levels Card --- */}
+            {/* --- NEW, REDESIGNED Inventory Levels Card --- */}
             <div className="card mb-6">
-                <h2 className="section-title flex items-center"><MapPin size={20} className="mr-3 text-primary-600"/>Inventory Levels</h2>
-                {currentInventoryByLocation.length > 0 ? (
-                    <div className="overflow-x-auto">
-                        <table className="min-w-full text-sm"><thead><tr><th className="p-2 text-left font-semibold">Location</th><th className="p-2 text-center font-semibold">Quantity</th></tr></thead>
-                            <tbody className="divide-y divide-gray-100">
-                                {currentInventoryByLocation.map(([loc, qty]) => (<tr key={loc}><td className="p-2">{loc}</td><td className="p-2 text-center font-bold">{qty}</td></tr>))}
-                                <tr className="font-bold bg-gray-50"><td className="p-2">Total</td><td className="p-2 text-center">{totalInventory}</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                ) : <p className="text-gray-500 italic">No inventory recorded for this product.</p>}
+                <div className="flex justify-between items-center">
+                    <h2 className="section-title flex items-center"><MapPin size={20} className="mr-3 text-primary-600"/>Inventory Levels</h2>
+                    <p className="font-bold text-xl">Total Stock: {totalInventory}</p>
+                </div>
+                <div className="mt-4">
+                    {inventoryByLocation.size > 0 ? (
+                        Array.from(inventoryByLocation.entries()).map(([location, items]) => (
+                            <LocationInventory key={location} location={location} items={items} />
+                        ))
+                    ) : (
+                        <p className="text-gray-500 italic p-4 text-center">No inventory recorded for this product.</p>
+                    )}
+                </div>
             </div>
 
-            {/* --- Transaction History Card --- */}
-            <div className="card">
-                <h2 className="section-title flex items-center"><History size={20} className="mr-3 text-primary-600"/>Recent Transaction History</h2>
-                {recentLogs.length === 0 ? (
-                    <p className="text-gray-500 italic">No transaction history for this product.</p>
-                ) : isMobile ? (
-                    <div className="-mx-4 -mb-4 mt-4 bg-gray-50 p-4 rounded-b-lg">
-                        {recentLogs.map(tx => <TransactionCard key={tx.id} transaction={tx} product={product} />)}
-                    </div>
-                ) : (
-                    <div className="overflow-x-auto mt-4">
-                         <table className="min-w-full divide-y divide-gray-200 text-sm">
-                            <thead className="bg-gray-50"><tr>
-                                <th className="p-2 text-left">Type</th>
-                                <th className="p-2 text-left">Change</th>
-                                <th className="p-2 text-left">Qty After</th>
-                                <th className="p-2 text-left">Location</th>
-                                <th className="p-2 text-left">Date</th>
-                                <th className="p-2 text-left">User</th>
-                            </tr></thead>
-                            <tbody className="divide-y divide-gray-100">
-                                {recentLogs.map(tx => {
-                                    const changeColor = tx.isGrouped ? 'text-blue-600' : (tx.quantityChange > 0 ? 'text-green-600' : 'text-red-600');
-                                    const changePrefix = tx.isGrouped ? '' : (tx.quantityChange > 0 ? '+' : '-');
-                                    const quantity = Math.abs(tx.quantityChange);
-                                    return (
-                                        <tr key={tx.id}>
-                                            <td className="p-2 font-semibold">{tx.type}</td>
-                                            <td className={`p-2 font-bold ${changeColor}`}>{changePrefix}{quantity}</td>
-                                            <td className="p-2 font-bold">{tx.quantityAfter}</td>
-                                            <td className="p-2">{tx.isGrouped ? `${tx.fromLocation} → ${tx.toLocation}` : tx.location}</td>
-                                            <td className="p-2">{formatDate(tx.timestamp)}</td>
-                                            <td className="p-2 text-gray-500">{tx.userEmail || 'System'}</td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
-                {totalTransactionCount > 5 && (
-                    <div className="mt-4 pt-4 border-t border-gray-200 text-right">
-                        <button onClick={() => navigate(`/products/history/${product.sku}`)} className="btn btn-secondary">View All History</button>
-                    </div>
-                )}
-            </div>
+            {/* Transaction history removed for now, will be replaced by Event Log */}
+
         </div>
     );
 };

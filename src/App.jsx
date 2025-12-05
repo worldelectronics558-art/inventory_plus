@@ -1,3 +1,4 @@
+
 // src/App.jsx
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -9,7 +10,9 @@ import { useUser } from './contexts/UserContext.jsx';
 import { useProducts } from './contexts/ProductContext.jsx';
 import { useInventory } from './contexts/InventoryContext.jsx';
 import { LocationProvider } from './contexts/LocationContext.jsx';
+import { useCustomers } from './contexts/CustomerContext.jsx';
 import { useLoading } from './contexts/LoadingContext';
+import { PurchaseInvoiceProvider } from './contexts/PurchaseInvoiceContext.jsx'; // Import the new provider
 import LoadingOverlay from './components/LoadingOverlay';
 import MainLoadingOverlay from './components/MainLoadingOverlay';
 
@@ -19,9 +22,18 @@ import Header from './components/Header.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
 import ProductsPage from './pages/ProductsPage.jsx';
 import InventoryPage from './pages/InventoryPage.jsx';
+import CustomersPage from './pages/CustomersPage.jsx';
 import HistoryPage from './pages/HistoryPage.jsx';
 import SettingsPage from './pages/SettingsPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
+import PurchasingPage from './pages/PurchasingPage.jsx'; // Import the new page
+import SuppliersPage from './pages/SuppliersPage.jsx';
+import NewSupplierForm from './pages/PurchasingSubPages/NewSupplierForm.jsx';
+import SupplierDetailsPage from './pages/PurchasingSubPages/SupplierDetailsPage.jsx';
+import EditSupplierForm from './pages/PurchasingSubPages/EditSupplierForm.jsx';
+import NewPurchaseInvoiceForm from './pages/PurchasingSubPages/NewPurchaseInvoiceForm.jsx'; // Import the new form
+import CustomerDetailsPage from './pages/CustomersSubPages/CustomerDetailsPage.jsx';
+import NewCustomerForm from './pages/CustomersSubPages/NewCustomerForm.jsx';
 
 // Products Sub-Pages
 import AddProductForm from './pages/ProductsSubPages/AddProductForm.jsx';
@@ -35,70 +47,43 @@ import StockInForm from './pages/InventorySubPages/StockInForm.jsx';
 import StockOutForm from './pages/InventorySubPages/StockOutForm.jsx';
 import TransferForm from './pages/InventorySubPages/TransferForm.jsx';
 
-// Custom hook to check screen size
+// Sales Pages
+import Sales from './pages/Sales.jsx';
+import SalesOrderList from './pages/SalesSubPages/SalesOrderList.jsx';
+import NewSalesOrder from './pages/SalesSubPages/NewSalesOrder.jsx';
+
 const useMediaQuery = (query) => {
     const [matches, setMatches] = useState(window.matchMedia(query).matches);
-
     useEffect(() => {
         const media = window.matchMedia(query);
         const listener = () => setMatches(media.matches);
         media.addEventListener('change', listener);
         return () => media.removeEventListener('change', listener);
     }, [query]);
-
     return matches;
 };
 
-// Placeholder Pages for now
-const ReportsPage = () => <div className="p-8">Placeholder for Reports</div>;
-
-// Component to handle conditional rendering based on authentication
 const AppContent = () => {
-    const [showConnectionModal, setShowConnectionModal] = useState(false);
-    
-    // --- RESPONSIVE STATE MANAGEMENT ---
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [isMobileMenuOpen, setMobileMenuOpen] = useState(false);
-    
-    // md breakpoint is 768px
     const isDesktop = useMediaQuery('(min-width: 768px)');
 
-    const toggleSidebarCollapse = useCallback(() => {
-        setIsSidebarCollapsed(prev => !prev);
-    }, []);
+    const toggleSidebarCollapse = useCallback(() => setIsSidebarCollapsed(prev => !prev), []);
+    const openMobileMenu = useCallback(() => setMobileMenuOpen(true), []);
+    const closeMobileMenu = useCallback(() => setMobileMenuOpen(false), []);
 
-    const openMobileMenu = useCallback(() => {
-        setMobileMenuOpen(true);
-    }, []);
-
-    const closeMobileMenu = useCallback(() => {
-        setMobileMenuOpen(false);
-    }, []);
-
-    // Close mobile menu on resize to desktop view
-    useEffect(() => {
-        if (isDesktop) {
-            setMobileMenuOpen(false);
-        }
-    }, [isDesktop]);
+    useEffect(() => { if (isDesktop) setMobileMenuOpen(false); }, [isDesktop]);
     
-    // --- END: RESPONSIVE STATE ---
-
-    // Define content margin based on sidebar state and screen size
     const mainContentClass = isDesktop ? (isSidebarCollapsed ? 'md:ml-16' : 'md:ml-64') : 'ml-0';
 
     const { isAuthenticated: isAuthContextAuthenticated, authReady } = useAuth();
     const { userPermissions, isLoading: isUserLoading } = useUser();
-    const { isLoading: isProductsLoading, isOnline } = useProducts();
+    const { isLoading: isProductsLoading } = useProducts();
     const { isLoading: isInventoryLoading } = useInventory();
+    const { isLoading: isCustomersLoading } = useCustomers();
     const { isAppProcessing } = useLoading();
 
-    const isDataLoading = isAuthContextAuthenticated && (
-        isUserLoading ||
-        isProductsLoading ||
-        isInventoryLoading
-    );
-
+    const isDataLoading = isAuthContextAuthenticated && (isUserLoading || isProductsLoading || isInventoryLoading || isCustomersLoading);
     const isAppLoading = !authReady || isDataLoading;
     const isAuthenticated = userPermissions.isAuthenticated || isAuthContextAuthenticated;
 
@@ -113,59 +98,51 @@ const AppContent = () => {
              </div>
         );
     }
-    
+
     return (
-        <LocationProvider>
-            {/* The root div no longer uses flexbox for the main layout */}
-            <div className="min-h-screen bg-gray-100">
-                <Sidebar
-                    isCollapsed={isSidebarCollapsed}
-                    isDesktop={isDesktop}
-                    isMobileMenuOpen={isMobileMenuOpen}
-                    onCloseMobileMenu={closeMobileMenu} // Pass the close function
-                />
-                <Header 
-                    isSidebarCollapsed={isSidebarCollapsed}
-                    isDesktop={isDesktop}
-                    onToggleCollapse={toggleSidebarCollapse}
-                    onOpenMobileMenu={openMobileMenu}
-                />
-                {isAppProcessing && <LoadingOverlay />}
-                {/* The main content area is now a direct child with responsive margin */}
-                <main className={`flex-1 transition-all duration-300 ${mainContentClass} mt-16 p-3 md:p-6 overflow-hidden`}>
-                    <Routes>
-                        <Route path="/" element={<DashboardPage />} />
-                        <Route path="/products" element={<ProductsPage />} />
-                        <Route path="/products/add" element={<AddProductForm />} /> 
-                        <Route path="/products/bulk-import" element={<ProductsImportForm />} /> 
-                        <Route path="/products/edit/:id" element={<EditProductForm />} />
-                        <Route path="/products/details/:id" element={<ProductDetailsPage />} />
-                        <Route path="/products/history/:sku" element={<ProductHistoryPage />} />
-                        <Route path="/inventory" element={<InventoryPage />} />
-                        <Route path="/inventory/stock-in" element={<StockInForm />} />
-                        <Route path="/inventory/stock-out" element={<StockOutForm />} />
-                        <Route path="/inventory/transfer" element={<TransferForm />} />
-                        <Route path="/history" element={<HistoryPage />} />
-                        <Route path="/reports" element={<ReportsPage />} />
-                        <Route path="/settings" element={<SettingsPage />} />
-                        <Route path="*" element={<div className="p-8 text-2xl text-red-500">404 Page Not Found</div>} />
-                    </Routes>
-                </main>
-                {showConnectionModal && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-                        <LoginPage
-                            onClose={() => setShowConnectionModal(false)}
-                            isReconnectMode={true}
-                        />
-                    </div>
-                )}
-            </div>
-        </LocationProvider>
+        <PurchaseInvoiceProvider>
+            <LocationProvider>
+                <div className="min-h-screen bg-gray-100">
+                    <Sidebar isCollapsed={isSidebarCollapsed} isDesktop={isDesktop} isMobileMenuOpen={isMobileMenuOpen} onCloseMobileMenu={closeMobileMenu} />
+                    <Header isSidebarCollapsed={isSidebarCollapsed} isDesktop={isDesktop} onToggleCollapse={toggleSidebarCollapse} onOpenMobileMenu={openMobileMenu} />
+                    {isAppProcessing && <LoadingOverlay />}
+                    <main className={`flex-1 transition-all duration-300 ${mainContentClass} mt-16 p-3 md:p-6 overflow-hidden`}>
+                        <Routes>
+                            <Route path="/" element={<DashboardPage />} />
+                            <Route path="/products" element={<ProductsPage />} />
+                            <Route path="/products/add" element={<AddProductForm />} />
+                            <Route path="/products/bulk-import" element={<ProductsImportForm />} />
+                            <Route path="/products/edit/:id" element={<EditProductForm />} />
+                            <Route path="/products/details/:id" element={<ProductDetailsPage />} />
+                            <Route path="/products/history/:sku" element={<ProductHistoryPage />} />
+                            <Route path="/inventory" element={<InventoryPage />} />
+                            <Route path="/inventory/stock-in" element={<StockInForm />} />
+                            <Route path="/inventory/stock-out" element={<StockOutForm />} />
+                            <Route path="/inventory/transfer" element={<TransferForm />} />
+                            <Route path="/purchasing" element={<PurchasingPage />} />
+                            <Route path="/purchasing/invoices/new" element={<NewPurchaseInvoiceForm />} />
+                            <Route path="/purchasing/suppliers" element={<SuppliersPage />} />
+                            <Route path="/purchasing/suppliers/new" element={<NewSupplierForm />} />
+                            <Route path="/purchasing/suppliers/:id" element={<SupplierDetailsPage />} />
+                            <Route path="/purchasing/suppliers/:id/edit" element={<EditSupplierForm />} />
+                            <Route path="/sales" element={<Sales />}>
+                                <Route index element={<SalesOrderList />} />
+                                <Route path="new" element={<NewSalesOrder />} />
+                            </Route>
+                            <Route path="/customers" element={<CustomersPage />} />
+                            <Route path="/customers/new" element={<NewCustomerForm />} />
+                            <Route path="/customers/:id" element={<CustomerDetailsPage />} />
+                            <Route path="/history" element={<HistoryPage />} />
+                            <Route path="/settings" element={<SettingsPage />} />
+                            <Route path="*" element={<div className="p-8 text-2xl text-red-500">404 Page Not Found</div>} />
+                        </Routes>
+                    </main>
+                </div>
+            </LocationProvider>
+        </PurchaseInvoiceProvider>
     );
 };
 
-const App = () => {
-    return <AppContent />;
-};
+const App = () => <AppContent />;
 
 export default App;

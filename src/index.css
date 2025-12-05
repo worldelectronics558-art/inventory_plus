@@ -1,4 +1,5 @@
-/* D:/inventoryplus/src/index.css */
+
+/* src/index.css */
 
 @import "tailwindcss";
 
@@ -6,9 +7,8 @@
 @config "../tailwind.config.js"; 
 
 /* ----------------------------------------------------
-    1. BASE LAYER (No Custom Variables Needed Here Anymore)
+    1. BASE LAYER
 ----------------------------------------------------- */
-
 @layer base {
   body {
     /* Use generated classes for background and text */
@@ -42,11 +42,26 @@
 }
 
 /* ----------------------------------------------------
-    2. COMPONENTS (Using fully generated classes!)
+    2. COMPONENTS
 ----------------------------------------------------- */
 @layer components {
-
-  /* INPUT COMPONENT CLASS */
+  /* Page Layout */
+  .page-container {
+    @apply p-4 sm:p-6 lg:p-8;
+  }
+  .page-header {
+    @apply flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6;
+  }
+  .page-title {
+    @apply text-2xl font-bold text-gray-900 mb-4 sm:mb-0;
+  }
+  .page-actions {
+    @apply flex items-center gap-2;
+  }
+  .page-content {
+    @apply mt-4;
+  }
+    /* INPUT COMPONENT CLASS */
   .input-base {
     /* Uses generated classes */
     @apply w-full bg-secondary-50 text-primary-900
@@ -54,39 +69,31 @@
       rounded-lg px-3 py-2.5 shadow-sm
       placeholder:text-[rgb(148_163_184)]
       focus:outline-none focus:ring-2 focus:ring-secondary-700 focus:border-secondary-700;
-  }
+    }
 
-  /* ERROR & SUCCESS MESSAGES */
-  .error-message { @apply text-danger-500 text-sm mt-1; }
-  .success-message { @apply text-[rgb(34_197_94)] text-sm mt-1; }
-
-  /* BUTTONS */
+  /* Buttons */
   .btn {
     @apply inline-flex items-center justify-center
       px-4 py-1 rounded-lg font-medium select-none
       transition-all duration-200 cursor-pointer shadow-sm;
   }
-
   .btn-primary {
     @apply text-white bg-secondary-700
       bg-gradient-to-b from-[rgba(255,255,255,0.18)] to-[rgba(0,0,0,0.08)]
       hover:bg-secondary-900
       active:shadow-inner;
   }
-
   .btn-secondary {
     @apply text-white bg-action-500
       bg-gradient-to-b from-[rgba(255,255,255,0.18)] to-[rgba(0,0,0,0.06)]
       hover:bg-action-700
       active:shadow-inner;
   }
-
   .btn-accent {
     @apply text-primary-900 bg-accent-500
       hover:bg-accent-700
       active:shadow-inner;
   }
-
   .btn-outline-primary {
     @apply bg-white border border-secondary-700
       text-secondary-700
@@ -104,30 +111,104 @@
       hover:bg-danger-700
       active:shadow-inner;
   }
-
-  /* Sizes (no change) */
+  .btn-icon {
+    @apply p-2 text-gray-500 hover:bg-gray-100 rounded-full;
+  }
+  /* Sizes  */
   .btn-sm { @apply text-sm px-3 py-1.5; }
   .btn-lg { @apply text-lg px-6 py-3; }
 
-  /* CARD (no change) */
+  /* Cards */
   .card {
-    @apply bg-white rounded-lg border border-gray-200 
-      shadow-sm p-4;
+    @apply bg-white rounded-lg shadow-sm border border-gray-200;
   }
 
-  /* --- .sidebar and .main-content rules are removed --- */
+  /* Tables */
+  .table {
+    @apply w-full text-left border-collapse;
+  }
+  .table th, .table td {
+    @apply p-3 border-b border-gray-200;
+  }
+  .table th {
+    @apply bg-gray-50 text-xs font-semibold text-gray-600 uppercase tracking-wider;
+  }
+  .table tbody tr:hover {
+    @apply bg-gray-50;
+  }
+  .contact-cell {
+    @apply flex flex-col;
+  }
+
+  /* Forms */
+  .search-input-container {
+    @apply relative;
+  }
+  .search-input {
+    @apply pl-10 pr-4 py-2 border rounded-md w-full;
+  }
+  .search-input-icon {
+    @apply absolute left-3 top-1/2 -translate-y-1/2 text-gray-400;
+  }
+
+  /* NEW FORM STYLES */
+  .form-section {
+      @apply grid grid-cols-1 md:grid-cols-3 gap-6;
+  }
+  .form-section-title {
+      @apply md:col-span-1;
+  }
+  .form-section-title h3 {
+      @apply text-lg font-medium leading-6 text-gray-900;
+  }
+  .form-section-title p {
+      @apply mt-1 text-sm text-gray-600;
+  }
+  .form-section-content {
+      @apply md:col-span-2 mt-5 md:mt-0;
+  }
+  .form-grid {
+      @apply grid grid-cols-1 sm:grid-cols-6 gap-6;
+  }
+  .form-toggle {
+      @apply relative inline-flex items-center h-6 rounded-full w-11 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500;
+  }
+  .form-toggle-knob {
+      @apply inline-block w-4 h-4 transform bg-white rounded-full transition-transform;
+  }
+
+  /* Badges */
+  .badge {
+    @apply px-2 py-1 text-xs font-semibold leading-tight rounded-full;
+  }
+
+  /* MODAL STYLES */
+  .modal-backdrop {
+    @apply fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-20 sm:pt-24;
+  }
+
+  .modal-container {
+    @apply bg-white rounded-xl shadow-2xl w-full max-w-lg mx-auto transition-all;
+  }
+
+  .modal-header {
+    @apply flex justify-between items-center p-5 border-b border-gray-200;
+  }
+
+  .modal-close-button {
+    @apply text-gray-500 hover:text-gray-800 text-3xl font-light leading-none p-1 -m-1;
+  }
+
+  .modal-footer {
+    @apply flex justify-end items-center p-4 bg-gray-50 rounded-b-xl space-x-3;
+  }
 
   .sidebar-header {
-      @apply bg-primary-900 text-white p-4 text-center border-b border-primary-900;
-  }
-
-  .sidebar-user-info {
-      @apply text-xs text-[#c1f4ee] p-2 border-b border-primary-900;
-      word-break: break-all;
+    @apply bg-primary-900 text-white p-4 text-center border-b border-primary-900;
   }
 
   .sidebar-link {
-      @apply flex items-center w-full px-4 py-3 text-sm font-medium rounded-lg transition-colors;
+    @apply flex items-center w-full px-4 py-3 text-sm font-medium rounded-lg transition-colors text-white;
   }
 
     .sidebar-link:not(.active) {
@@ -141,7 +222,13 @@
   .sidebar-footer {
       @apply border-t border-primary-900 p-2;
   }
-  
+  /* New Gradient Sidebar Class */
+  .sidebar-gradient {
+    /* Use gradient-to-right (r) */
+    /* Use the custom color primary-900 as the starting color */
+    /* Use the custom color secondary-900 as the ending color */
+    @apply bg-gradient-to-r from-primary-900 to-secondary-700;
+  }
   /* TITLES */
   .page-title { @apply text-3xl font-extrabold text-primary-900 mb-8 tracking-tight; }
 
@@ -175,10 +262,10 @@
   .modal-backdrop { @apply fixed inset-0 bg-black/40 backdrop-blur-sm; }
 }
 
+
 /* ----------------------------------------------------
     AG-GRID THEME (No change)
 ---------------------------------------------------- */
-/* We must keep the AG-Grid colors defined as pure CSS vars */
 .ag-theme-indigo {
     --ag-foreground-color: #264653; /* primary-900 */
     --ag-background-color: #ffffff;
@@ -198,20 +285,9 @@
     --ag-secondary-border-color: #e5e7eb;
 }
 
-/* Custom style for action column cell content alignment (Kept as is) */
 .ag-cell-actions {
     display: flex;
     justify-content: flex-end;
     align-items: center;
     padding-right: 1rem !important;
-}
-
-/* ----------------------------------------------------
-    UTILITIES (no change)
------------------------------------------------------ */
-@layer utilities {
-
-  .divider { @apply h-px bg-[rgb(229_231_235)] my-4; }
-  .shadow-soft { @apply shadow-[0_1px_3px_rgba(0,0,0,0.06)]; }
-  .shadow-medium { @apply shadow-[0_4px_6px_rgba(0,0,0,0.1)]; }
 }

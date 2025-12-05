@@ -6,6 +6,7 @@ module.exports = {
     // Ensure Tailwind scans all your template files (adjust paths as needed)
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
+    "./src/pages/PurchasingSubPages/SupplierDetailsPage.jsx",
   ],
   theme: {
     extend: {

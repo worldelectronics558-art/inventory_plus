@@ -1,169 +1,75 @@
+
 // src/pages/InventorySubPages/TransferForm.jsx
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import Select from 'react-select';
 import { useNavigate } from 'react-router-dom';
 import { useInventory } from '../../contexts/InventoryContext';
 import { useProducts } from '../../contexts/ProductContext';
 import { useLocations } from '../../contexts/LocationContext';
-import { useAuth } from '../../contexts/AuthContext';
-import { useUser } from '../../contexts/UserContext';
 import { useLoading } from '../../contexts/LoadingContext';
-import localforage from 'localforage';
-import * as XLSX from 'xlsx';
-import { jsPDF } from 'jspdf';
-import 'jspdf-autotable';
-import AddLocationModal from '../../components/AddLocationModal'; // Import the modal
-import { getProductBySku, getProductDisplayName } from '../../utils/productUtils';
+import { getProductDisplayName } from '../../utils/productUtils';
 
-// --- FORM STATE PERSISTENCE ---
-const FORM_STATE_STORE_NAME = 'formStatesCache';
-const formStateStore = localforage.createInstance({
-    name: "inventoryApp",
-    storeName: FORM_STATE_STORE_NAME,
-});
-const FORM_STATE_KEYS = { TRANSFER: 'formState_transfer' };
-// --- END: FORM STATE --- 
-
-// --- STYLING FOR REACT-SELECT ---
+// Reusing select styles for consistency
 const customSelectStyles = {
-    control: (provided, state) => ({
-        ...provided,
-        backgroundColor: '#dff6f4', // secondary-50
-        border: 'none',
-        boxShadow: 'none', // Remove focus shadow
-        minHeight: '38px',
-    }),
-    valueContainer: (provided) => ({
-        ...provided,
-        padding: '0 8px',
-    }),
-    input: (provided) => ({
-        ...provided,
-        margin: '0px',
-        padding: '0px',
-    }),
-    indicatorSeparator: () => ({ display: 'none' }),
-    singleValue: (provided) => ({ // This removes the box around the selected value
-        ...provided,
-        backgroundColor: 'transparent',
-        color: 'inherit',
-    }),
-    menu: (provided) => ({
-        ...provided,
-        zIndex: 20, // Ensure dropdown appears over other elements
-        backgroundColor: '#dff6f4', // secondary-50
-    }),
-    menuPortal: (base) => ({ ...base, zIndex: 9999 })
+    control: (p, s) => ({ ...p, width: '100%', backgroundColor: '#F9FAFB', border: s.isFocused ? '2px solid #3B82F6' : '1px solid #D1D5DB', borderRadius: '0.5rem', padding: '0.1rem 0', boxShadow: 'none', '&:hover': { borderColor: s.isFocused ? '#3B82F6' : '#9CA3AF'} }),
+    menu: (p) => ({...p, zIndex: 20, backgroundColor: '#F9FAFB'}),
+    option: (p, s) => ({...p, backgroundColor: s.isSelected ? '#3B82F6' : s.isFocused ? '#DBEAFE' : 'transparent', color: s.isSelected ? 'white' : '#111827'}),
+    menuPortal: (b) => ({ ...b, zIndex: 9999 })
 };
-// --- END: STYLING ---
 
 const TransferForm = () => {
     const navigate = useNavigate();
-    const { stockLevels, createTransaction } = useInventory();
+    const { transfer, stockLevels } = useInventory();
     const { products } = useProducts();
-    const { locations, isLoading: isLocationsLoading } = useLocations();
-    const { auth } = useAuth();
-    const { 
-        currentUser, 
-        userPermissions, 
-        assignedLocations: rawAssignedLocations, 
-        isLoading: isUserLoading 
-    } = useUser();
+    const { locations } = useLocations();
     const { setAppProcessing } = useLoading();
 
     // --- STATE MANAGEMENT ---
-    const [transactionDate, setTransactionDate] = useState(new Date().toISOString().split('T')[0]);
     const [notes, setNotes] = useState('');
-    const [documentNumber, setDocumentNumber] = useState('');
-    const [items, setItems] = useState([{ sku: null, fromLocation: null, toLocation: null, quantity: 1 }]);
-    const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
-    const [isAddLocationModalOpen, setAddLocationModalOpen] = useState(false); // State for the modal
-    const [isLoadingFormState, setIsLoadingFormState] = useState(true);
-    // --- END: STATE ---
-
-    const assignedLocations = useMemo(() => rawAssignedLocations || [], [rawAssignedLocations]);
+    const [referenceNumber, setReferenceNumber] = useState('');
+    const [items, setItems] = useState([{ 
+        sku: null, 
+        fromLocation: null,
+        toLocation: null,
+        quantity: 1, 
+        isSerialized: false,
+        serials: [] 
+    }]);
 
     // --- OPTIONS FOR SELECTS ---
-    const productOptions = useMemo(() => products.map(product => ({ value: product.sku, label: getProductDisplayName(product) })), [products]);
-
-    const fromLocationOptions = useMemo(() => {
-        const { role } = userPermissions;
-        let availableLocations = [];
-        if (role === 'admin') {
-            availableLocations = locations;
-        } else if (role === 'manager') {
-            availableLocations = locations.filter(loc => assignedLocations.includes(loc.id));
-        }
-        return availableLocations.map(loc => ({ value: loc.name, label: loc.name }));
-    }, [locations, userPermissions, assignedLocations]);
-
-    const toLocationOptions = useMemo(() => locations.map(loc => ({ value: loc.name, label: loc.name })), [locations]);
-    // --- END: OPTIONS ---
-
-    // --- FORM STATE PERSISTENCE EFFECTS ---
-    useEffect(() => {
-        let isCancelled = false;
-        const loadSavedState = async () => {
-            setIsLoadingFormState(true);
-            try {
-                const savedState = await formStateStore.getItem(FORM_STATE_KEYS.TRANSFER);
-                if (savedState && !isCancelled) {
-                    setTransactionDate(savedState.transactionDate || new Date().toISOString().split('T')[0]);
-                    setNotes(savedState.notes || '');
-                    setDocumentNumber(savedState.documentNumber || '');
-                    if (savedState.items && savedState.items.length > 0) {
-                        setItems(savedState.items);
-                    }
-                }
-            } catch (error) {
-                console.error("[TransferForm] Error loading saved form state:", error);
-            } finally {
-                if (!isCancelled) setIsLoadingFormState(false);
-            }
-        };
-        loadSavedState();
-        return () => { isCancelled = true; };
-    }, []);
-
-    useEffect(() => {
-        if (!isLoadingFormState) {
-            const stateToSave = { transactionDate, notes, documentNumber, items };
-            const saveTimer = setTimeout(() => formStateStore.setItem(FORM_STATE_KEYS.TRANSFER, stateToSave), 500);
-            return () => clearTimeout(saveTimer);
-        }
-    }, [transactionDate, notes, documentNumber, items, isLoadingFormState]);
-    // --- END: PERSISTENCE ---
+    const productOptions = useMemo(() => products.map(p => ({ value: p.sku, label: getProductDisplayName(p), isSerialized: p.isSerialized ?? true })), [products]);
+    const locationOptions = useMemo(() => locations.map(l => ({ value: l.name, label: l.name })), [locations]);
 
     // --- HANDLERS ---
     const handleItemChange = (index, field, value) => {
         const newItems = [...items];
-        newItems[index][field] = value;
+        const currentItem = { ...newItems[index] };
+        currentItem[field] = value;
 
-        // If we change the 'from' location or the SKU, we must update the current quantity
-        if (field === 'sku' || field === 'fromLocation') {
-            const skuToCheck = newItems[index].sku?.value || '';
-            const product = getProductBySku(products, skuToCheck);
-            const currentQty = product ? (stockLevels[skuToCheck] || {})[newItems[index].fromLocation?.value] || 0 : 0;
-            newItems[index].currentQty = currentQty;
-        }
-        
-        // Prevent to and from being the same
-        if (field === 'toLocation' && value?.value === newItems[index].fromLocation?.value) {
-            alert('"From" and "To" locations cannot be the same.');
-            newItems[index].toLocation = null; // Reset selection
-        }
-        if (field === 'fromLocation' && value?.value === newItems[index].toLocation?.value) {
-            alert('"From" and "To" locations cannot be the same.');
-            newItems[index].fromLocation = null; // Reset selection
-            newItems[index].currentQty = 0;
+        if (field === 'sku') {
+            currentItem.isSerialized = value ? value.isSerialized : false;
+            currentItem.quantity = 1;
+            currentItem.serials = currentItem.isSerialized ? [''] : [];
         }
 
+        if (field === 'quantity' && currentItem.isSerialized) {
+            const newQuantity = parseInt(value, 10) || 0;
+            currentItem.serials = Array.from({ length: newQuantity }, (_, i) => currentItem.serials[i] || '');
+        }
+
+        newItems[index] = currentItem;
+        setItems(newItems);
+    };
+
+    const handleSerialChange = (itemIndex, serialIndex, value) => {
+        const newItems = [...items];
+        newItems[itemIndex].serials[serialIndex] = value;
         setItems(newItems);
     };
 
     const handleAddItem = () => {
-        setItems([...items, { sku: null, fromLocation: null, toLocation: null, quantity: 1, currentQty: 0 }]);
+        setItems([...items, { sku: null, fromLocation: null, toLocation: null, quantity: 1, isSerialized: false, serials: [] }]);
     };
 
     const handleRemoveItem = (index) => {
@@ -173,179 +79,136 @@ const TransferForm = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!auth.currentUser || !currentUser) { // Updated condition
-            alert('User data is not loaded yet. Please try again in a moment.');
-            return;
-        }
-        if (items.some(item => !item.sku || !item.fromLocation || !item.toLocation || item.quantity <= 0)) {
-            alert('Please fill in all SKU, From/To Location, and Quantity fields correctly.');
-            return;
-        }
 
         for (const item of items) {
-            const currentQty = (stockLevels[item.sku.value] || {})[item.fromLocation.value] || 0;
-            if (currentQty < item.quantity) {
-                alert(`Insufficient stock for ${item.sku.label} at ${item.fromLocation.label}. Requested: ${item.quantity}, Available: ${currentQty}`);
+            if (!item.sku || !item.fromLocation || !item.toLocation || item.quantity <= 0) {
+                alert('Please fill in Product, From/To Locations, and Quantity for all items.');
                 return;
+            }
+            if (item.fromLocation.value === item.toLocation.value) {
+                alert(`'From' and 'To' locations cannot be the same for ${item.sku.label}.`);
+                return;
+            }
+            if (item.isSerialized) {
+                if (item.serials.length !== item.quantity || item.serials.some(s => !s.trim())) {
+                    alert(`Please enter all ${item.quantity} serial numbers for ${item.sku.label}.`);
+                    return;
+                }
+            } else {
+                 const availableStock = stockLevels[item.sku.value]?.[item.fromLocation.value] || 0;
+                 if (item.quantity > availableStock) {
+                     alert(`Cannot transfer ${item.quantity} units of ${item.sku.label}. Only ${availableStock} available at ${item.fromLocation.label}.`);
+                     return;
+                 }
             }
         }
 
         setAppProcessing(true);
         try {
-            await createTransaction({
-                type: 'TRANSFER',
-                notes,
-                documentNumber,
+            const operationData = {
+                notes: notes,
+                referenceNumber: referenceNumber,
                 items: items.map(item => ({
                     sku: item.sku.value,
-                    productName: item.sku.label,
                     fromLocation: item.fromLocation.value,
                     toLocation: item.toLocation.value,
                     quantity: item.quantity,
-                })),
-            }, auth.currentUser.uid, currentUser.displayName || currentUser.email || auth.currentUser.email || 'System'); // Updated arguments
-            alert('Transfer transaction recorded successfully!');
-            await formStateStore.removeItem(FORM_STATE_KEYS.TRANSFER);
+                    isSerialized: item.isSerialized,
+                    serials: item.isSerialized ? item.serials.map(s => s.trim()) : [],
+                }))
+            };
+
+            await transfer(operationData);
+            alert('Transfer Successful!');
             navigate('/inventory');
+
         } catch (error) {
-            alert(`Failed to record Transfer: ${error.message}`);
+            console.error("Transfer failed:", error);
+            alert(`Transfer failed: ${error.message}`);
         } finally {
             setAppProcessing(false);
         }
     };
 
-    const handleReset = () => {
-        setTransactionDate(new Date().toISOString().split('T')[0]);
-        setNotes('');
-        setDocumentNumber('');
-        setItems([{ sku: null, fromLocation: null, toLocation: null, quantity: 1, currentQty: 0 }]);
-        formStateStore.removeItem(FORM_STATE_KEYS.TRANSFER);
-    };
-
-    const handleExport = (format) => {
-        if (items.every(item => !item.sku && !item.fromLocation && !item.toLocation)) {
-            alert('No items to export.');
-            return;
-        }
-        const exportData = items.map(item => ({
-            SKU: item.sku?.label || 'N/A',
-            'From Location': item.fromLocation?.label || '',
-            'To Location': item.toLocation?.label || '',
-            Quantity: item.quantity || 0,
-        }));
-        const commonExport = (wb, doc) => {
-            if (format === 'excel') XLSX.writeFile(wb, 'pending_transfers.xlsx');
-            else if (format === 'pdf') doc.save('pending_transfers.pdf');
-        }
-        if (format === 'excel') {
-            const ws = XLSX.utils.json_to_sheet(exportData);
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, 'Pending_Transfers');
-            commonExport(wb, null);
-        } else if (format === 'pdf') {
-            const doc = new jsPDF();
-            doc.autoTable({ head: [['SKU', 'From Location', 'To Location', 'Quantity']], body: exportData.map(Object.values) });
-            commonExport(null, doc);
-        }
-    };
-    // --- END: HANDLERS ---
-
-    if (!userPermissions.canManageInventory) {
-        return <div className="p-8 text-center text-red-600">Access Denied.</div>;
-    }
-
-    if (isLoadingFormState || isLocationsLoading || isUserLoading) {
-        return <div className="p-8 text-center">Loading Form...</div>;
-    }
-
     return (
-        <>
-            <AddLocationModal isOpen={isAddLocationModalOpen} onClose={() => setAddLocationModalOpen(false)} />
-            <div className="min-h-screen bg-gray-100">
-                <div className="max-w-6xl mx-auto bg-white rounded-lg shadow-md p-6">
-                    <div className="flex justify-between items-center mb-6">
-                        <h1 className="text-2xl font-bold">Transfer</h1>
-                        <div className="flex gap-2">
-                            <button onClick={handleReset} className="btn btn-outline-danger">Reset</button>
-                            <button onClick={() => navigate('/inventory')} className="btn btn-outline-primary">Back</button>
-                        </div>
-                    </div>
-                    <form onSubmit={handleSubmit} className="space-y-6">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium mb-1">Reference Number</label>
-                                <input type="text" value='Will be generated on commit' readOnly className="input-base bg-gray-100" />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium mb-1">Transaction Date</label>
-                                <input type="date" value={transactionDate} onChange={(e) => setTransactionDate(e.target.value)} className="input-base" />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium mb-1">Document Number</label>
-                                <input type="text" value={documentNumber} onChange={(e) => setDocumentNumber(e.target.value)} placeholder="Optional" className="input-base" />
-                            </div>
+        <div className="min-h-screen bg-gray-100 p-4">
+            <div className="max-w-7xl mx-auto bg-white rounded-lg shadow-md p-6">
+                <div className="flex justify-between items-center mb-6">
+                    <h1 className="text-2xl font-bold">Transfer Stock</h1>
+                    <button onClick={() => navigate('/inventory')} className="btn btn-outline-primary">Back</button>
+                </div>
+                <form onSubmit={handleSubmit} className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium mb-1">Reference / Document Number</label>
+                            <input type="text" value={referenceNumber} onChange={(e) => setReferenceNumber(e.target.value)} placeholder="e.g., Transfer Order #" className="input-base" />
                         </div>
                         <div>
                             <label className="block text-sm font-medium mb-1">Notes</label>
-                            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows="2" className="input-base" />
+                            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows="1" className="input-base" placeholder="Optional notes for this transfer" />
                         </div>
-                        <div className="border rounded-lg overflow-hidden">
-                            <table className="table-base w-full">
-                                <thead className="bg-gray-50">
-                                    <tr className="gap-2">
-                                        <th className="th-base w-1/3">Model</th>
-                                        <th className="th-base">From Location</th>
-                                        <th className="th-base">To Location</th>
-                                        <th className="th-base">Current Qty</th>
-                                        <th className="th-base">Quantity</th>
-                                        <th className="th-base">Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y">
-                                    {items.map((item, index) => (
-                                        <tr key={index}>
-                                            <td className="td-base"><Select styles={customSelectStyles} options={productOptions} value={item.sku} onChange={v => handleItemChange(index, 'sku', v)} placeholder="Select..." isClearable menuPortalTarget={document.body} /></td>
-                                            <td className="td-base">
-                                                <div className="flex items-center">
-                                                    <Select className="flex-grow" styles={customSelectStyles} options={fromLocationOptions} value={item.fromLocation} onChange={v => handleItemChange(index, 'fromLocation', v)} placeholder="Select..." isClearable={false} menuPortalTarget={document.body} />
-                                                    <button type="button" onClick={() => setAddLocationModalOpen(true)} className="btn btn-sm ml-1">+</button>
-                                                </div>
-                                            </td>
-                                            <td className="td-base">
-                                                <div className="flex items-center">
-                                                    <Select className="flex-grow" styles={customSelectStyles} options={toLocationOptions.filter(opt => opt.value !== item.fromLocation?.value)} value={item.toLocation} onChange={v => handleItemChange(index, 'toLocation', v)} placeholder="Select..." isClearable={false} menuPortalTarget={document.body} />
-                                                    <button type="button" onClick={() => setAddLocationModalOpen(true)} className="btn btn-sm ml-1">+</button>
-                                                </div>
-                                            </td>
-                                            <td className="td-base text-center">{item.currentQty || 0}</td>
-                                            <td className="td-base"><input type="number" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', parseInt(e.target.value) || 0)} min="1" className="input-base w-full text-center" /></td>
-                                            <td className="td-base text-center"><button type="button" onClick={() => handleRemoveItem(index)} className="btn btn-outline-danger btn-sm">X</button></td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                        <div className="flex justify-between items-center">
-                            <button type="button" onClick={handleAddItem} className="btn btn-outline-primary">+ Add Line</button>
-                            <div className="flex items-center gap-2">
-                                <div className="relative inline-block text-left">
-                                    <button type="button" className="btn btn-outline-secondary" onClick={() => setIsExportMenuOpen(p => !p)}>Export</button>
-                                    {isExportMenuOpen && (
-                                        <div className="absolute right-0 mt-1 w-48 rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 z-10">
-                                            <ul role="none" className="py-1">
-                                                <li><button type="button" onClick={() => { handleExport('pdf'); setIsExportMenuOpen(false); }} className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100">As PDF</button></li>
-                                                <li><button type="button" onClick={() => { handleExport('excel'); setIsExportMenuOpen(false); }} className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100">As Excel</button></li>
-                                            </ul>
+                    </div>
+
+                    <div className="space-y-4">
+                        {items.map((item, index) => {
+                             const availableStock = item.sku && item.fromLocation ? (stockLevels[item.sku.value]?.[item.fromLocation.value] || 0) : 0;
+                             return (
+                                <div key={index} className="border rounded-lg p-4 space-y-4 bg-gray-50">
+                                    {/* --- Main Transfer Details --- */}
+                                    <div className="grid grid-cols-1 md:grid-cols-6 gap-4 items-start">
+                                        <div className="md:col-span-2">
+                                            <label className="block text-sm font-medium mb-1">Product *</label>
+                                            <Select styles={customSelectStyles} options={productOptions} value={item.sku} onChange={v => handleItemChange(index, 'sku', v)} placeholder="Select a product..." menuPortalTarget={document.body} />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium mb-1">From *</label>
+                                            <Select styles={customSelectStyles} options={locationOptions} value={item.fromLocation} onChange={v => handleItemChange(index, 'fromLocation', v)} placeholder="Source" menuPortalTarget={document.body} />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium mb-1">To *</label>
+                                            <Select styles={customSelectStyles} options={locationOptions} value={item.toLocation} onChange={v => handleItemChange(index, 'toLocation', v)} placeholder="Destination" menuPortalTarget={document.body} />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium mb-1">Quantity *</label>
+                                            <input type="number" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', parseInt(e.target.value) || 1)} min="1" max={!item.isSerialized ? availableStock : undefined} className="input-base w-full" />
+                                            {!item.isSerialized && <p className='text-xs text-gray-500 text-center mt-1'>Available: {availableStock}</p>}
+                                        </div>
+                                        <div className="flex items-end h-full">
+                                            <button type="button" onClick={() => handleRemoveItem(index)} className="btn btn-outline-danger w-full">Remove</button>
+                                        </div>
+                                    </div>
+
+                                    {/* --- Serial Number Inputs --- */}
+                                    {item.isSerialized && item.quantity > 0 && (
+                                        <div className="pt-4 mt-4 border-t">
+                                            <h3 className="text-md font-semibold text-gray-700 mb-2">Enter Serial Numbers to Transfer</h3>
+                                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                                                {item.serials.map((serial, serialIndex) => (
+                                                    <input
+                                                        key={serialIndex}
+                                                        type="text"
+                                                        value={serial}
+                                                        onChange={(e) => handleSerialChange(index, serialIndex, e.target.value)}
+                                                        placeholder={`Serial #${serialIndex + 1}`}
+                                                        className="input-base"
+                                                        required
+                                                    />
+                                                ))}
+                                            </div>
                                         </div>
                                     )}
                                 </div>
-                                <button type="submit" className="btn btn-secondary" disabled={!auth.currentUser}>Commit Transfer</button>
-                            </div>
-                        </div>
-                    </form>
-                </div>
+                            );
+                        })}
+                    </div>
+
+                    <div className="flex justify-between items-center pt-6 border-t">
+                        <button type="button" onClick={handleAddItem} className="btn btn-outline-primary">+ Add Another Item</button>
+                        <button type="submit" className="btn btn-primary">Commit Transfer</button>
+                    </div>
+                </form>
             </div>
-        </>
+        </div>
     );
 };
 
