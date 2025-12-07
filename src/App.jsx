@@ -38,6 +38,7 @@ import CustomerDetailsPage from './pages/CustomersSubPages/CustomerDetailsPage.j
 import NewCustomerForm from './pages/CustomersSubPages/NewCustomerForm.jsx';
 import StockReceivePage from './pages/PurchaseSubPages/StockReceivePage.jsx';
 import PurchaseFinalizationPage from './pages/PurchaseSubPages/PurchaseFinalizationPage.jsx';
+import ViewPurchaseInvoicePage from './pages/PurchaseSubPages/ViewPurchaseInvoicePage.jsx';
 
 // Products Sub-Pages
 import AddProductForm from './pages/ProductsSubPages/AddProductForm.jsx';
@@ -127,6 +128,7 @@ const AppContent = () => {
                                 <Route path="/purchase" element={<PurchasePage />} />
                                 <Route path="/purchase/new" element={<NewPurchaseInvoiceForm />} />
                                 <Route path="/purchase/edit/:id" element={<EditPurchaseInvoiceForm />} />
+                                <Route path="/purchase/view/:id" element={<ViewPurchaseInvoicePage />} />
                                 <Route path="/purchase/receive-stock" element={<StockReceivePage />} />
                                 <Route path="/purchase/finalize/:invoiceId" element={<PurchaseFinalizationPage />} />
                                 <Route path="/suppliers" element={<SuppliersPage />} />

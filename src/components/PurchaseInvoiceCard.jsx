@@ -1,7 +1,7 @@
 
 // src/components/PurchaseInvoiceCard.jsx
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { usePurchaseInvoices } from '../contexts/PurchaseInvoiceContext';
 import { Edit, Trash2, Eye } from 'lucide-react';
 
@@ -30,7 +30,11 @@ const PurchaseInvoiceCard = ({ invoice, isMutationDisabled }) => {
         }
     };
 
-    const handleCardClick = () => {
+    const handleCardClick = (e) => {
+        // Prevents navigation if a button inside the card was clicked
+        if (e.target.closest('button')) {
+            return;
+        } 
         if (invoice.status === 'pending') {
             navigate(`/purchase/finalize/${invoice.id}`);
         } else {
@@ -46,7 +50,13 @@ const PurchaseInvoiceCard = ({ invoice, isMutationDisabled }) => {
             <div className="card-body p-4">
                 <div className="flex justify-between items-start">
                     <div>
-                        <h3 className="font-bold text-lg text-gray-800">{invoice.invoiceNumber}</h3>
+                        <Link 
+                           to={`/purchase/view/${invoice.id}`}
+                           onClick={(e) => e.stopPropagation()} // Prevent card's onClick from firing
+                           className="font-bold text-lg text-blue-600 hover:underline"
+                        >
+                            {invoice.invoiceNumber}
+                        </Link>
                         <p className="text-sm text-gray-600">{invoice.supplierName}</p>
                     </div>
                     <span className={`px-3 py-1 text-xs font-semibold rounded-full ${getStatusChipClass(invoice.status)}`}>

@@ -1,7 +1,7 @@
 
 // src/pages/PurchasePage.jsx
 import React, { useState, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { usePurchaseInvoices } from '../contexts/PurchaseInvoiceContext';
 import { useAuth } from '../contexts/AuthContext';
 import useMediaQuery from '../hooks/useMediaQuery';
@@ -10,6 +10,7 @@ import { Edit, Trash2, Eye } from 'lucide-react';
 
 import { AgGridReact } from 'ag-grid-react';
 import { themeQuartz } from 'ag-grid-community';
+
 
 const StatusCellRenderer = (params) => {
     const status = params.value;
@@ -23,6 +24,18 @@ const StatusCellRenderer = (params) => {
         <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${statusClass}`}>
             {status}
         </span>
+    );
+};
+
+const InvoiceNumberCellRenderer = (params) => {
+    if (!params.data) return null;
+    return (
+        <Link 
+            to={`/purchase/view/${params.data.id}`}
+            className="text-blue-600 hover:underline font-medium"
+        >
+            {params.value}
+        </Link>
     );
 };
 
@@ -101,7 +114,13 @@ const PurchasePage = () => {
     }, [navigate, isMutationDisabled, deleteInvoice]);
 
     const columnDefs = useMemo(() => ([
-        { field: 'invoiceNumber', headerName: 'Number', filter: 'agTextColumnFilter', minWidth: 150 },
+        { 
+            field: 'invoiceNumber',
+            headerName: 'Number',
+            filter: 'agTextColumnFilter',
+            minWidth: 150, 
+            cellRenderer: InvoiceNumberCellRenderer
+        },
         { field: 'supplierName', headerName: 'Supplier', filter: 'agTextColumnFilter', minWidth: 200 },
         {
             field: 'invoiceDate',
@@ -182,7 +201,7 @@ const PurchasePage = () => {
                     ))}
                 </div>
             ) : (
-                <div className="ag-theme-indigo" style={{ height: '60vh', width: '100%' }}>
+                <div className="ag-theme-alpine" style={{ height: '60vh', width: '100%' }}>
                     <AgGridReact
                         theme={themeQuartz}
                         rowData={filteredInvoices}
@@ -191,7 +210,6 @@ const PurchasePage = () => {
                         pagination={true}
                         paginationPageSize={15}
                         paginationPageSizeSelector={[15, 30, 50]}
-                        rowSelection={{ mode: 'single' }}
                     />
                 </div>
             )}
