@@ -15,10 +15,12 @@ import {
 } from 'firebase/firestore';
 
 /**
- * Creates inventory item records when stock is received by a warehouse worker.
+ * Creates inventory items in the database based on a batch of reconciled items from a purchase invoice.
+ * This is the final step in the purchasing workflow.
  */
-export const handleStockIn = async (db, appId, userId, user, operationData) => {
-    if (!operationData.items?.length) throw new Error("No items for stock-in.");
+export const handleFinalizePurchaseBatch = async (db, appId, userId, user, items, purchaseInvoiceId, supplierId) => {
+    if (!items?.length) throw new Error("No items were provided to finalize.");
+    if (!purchaseInvoiceId) throw new Error("A purchase invoice ID is required.");
 
     const batch = writeBatch(db);
     const itemsCollectionRef = collection(db, `/artifacts/${appId}/inventory_items`);
@@ -26,78 +28,40 @@ export const handleStockIn = async (db, appId, userId, user, operationData) => {
     const timestamp = serverTimestamp();
     const allSerials = [];
 
-    operationData.items.forEach(item => {
-        const { sku, quantity, location, isSerialized, serials, costPrice } = item;
-        if (!operationData.invoiceId) throw new Error("An invoice ID is required to receive stock.");
-
-        if (isSerialized) {
-            if (serials.length !== quantity) throw new Error(`Mismatched quantity and serials for ${sku}.`);
-            serials.forEach(serial => {
-                const newItemRef = doc(itemsCollectionRef);
-                batch.set(newItemRef, { 
-                    sku, serialNumber: serial, internalSerialNumber: false, location, 
-                    status: 'received', receivedDate: timestamp, costPrice: costPrice || null, 
-                    purchaseInvoiceId: operationData.invoiceId 
-                });
-                allSerials.push(serial);
-            });
-        } else {
-            for (let i = 0; i < quantity; i++) {
-                const newItemRef = doc(itemsCollectionRef);
-                const internalSerial = `${sku}-${Date.now()}-${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
-                batch.set(newItemRef, { 
-                    sku, serialNumber: internalSerial, internalSerialNumber: true, location, 
-                    status: 'received', receivedDate: timestamp, costPrice: costPrice || null, 
-                    purchaseInvoiceId: operationData.invoiceId 
-                });
-                allSerials.push(internalSerial);
-            }
-        }
+    items.forEach(item => {
+        const newItemRef = doc(itemsCollectionRef);
+        batch.set(newItemRef, {
+            productId: item.productId,
+            productName: item.productName,
+            sku: item.productSku,
+            serialNumber: item.isSerialized ? item.serialNumber : `${item.productSku}-${Date.now()}-${Math.random().toString(36).substr(2, 4).toUpperCase()}`,
+            internalSerialNumber: !item.isSerialized,
+            location: item.location,
+            status: 'in_stock', // Directly into stock
+            stockInDate: timestamp,
+            receivedDate: item.receivedAt, // From the original receiving step
+            cost: item.cost,
+            supplierId: supplierId,
+            purchaseInvoiceId: purchaseInvoiceId,
+        });
+        allSerials.push(item.serialNumber);
     });
 
     const eventRef = doc(eventCollectionRef);
     batch.set(eventRef, {
-        type: 'RECEIVE_STOCK', timestamp, userId, userName: user?.firstName || 'N/A',
-        itemCount: allSerials.length, involvedSerials: allSerials,
-        location: operationData.items.length === 1 ? operationData.items[0].location : 'multiple',
-        referenceNumber: operationData.referenceNumber || null, notes: operationData.notes || null,
-        purchaseInvoiceId: operationData.invoiceId
+        type: 'PURCHASE_FINALIZATION',
+        timestamp,
+        userId,
+        userName: user?.displayName || 'System',
+        itemCount: items.length,
+        involvedSerials: allSerials,
+        purchaseInvoiceId: purchaseInvoiceId,
+        notes: `Finalized and added ${items.length} items to inventory.`
     });
 
     await batch.commit();
 };
 
-/**
- * Finalizes a purchase by moving all 'received' items for a specific invoice into 'in_stock' status.
- */
-export const handleFinalizePurchase = async (db, appId, purchaseInvoiceId) => {
-    if (!purchaseInvoiceId) throw new Error("A purchaseInvoiceId is required.");
-
-    const itemsCollectionRef = collection(db, `/artifacts/${appId}/inventory_items`);
-    const q = query(itemsCollectionRef, where("purchaseInvoiceId", "==", purchaseInvoiceId), where("status", "==", "received"));
-    const snapshot = await getDocs(q);
-    
-    if (snapshot.empty) {
-        console.warn(`No 'received' items found for invoice ${purchaseInvoiceId} to finalize.`);
-        return;
-    }
-
-    const batch = writeBatch(db);
-    const stockInTimestamp = serverTimestamp();
-
-    snapshot.docs.forEach(itemDoc => {
-        batch.update(itemDoc.ref, { status: 'in_stock', stockInDate: stockInTimestamp });
-    });
-
-    const eventCollectionRef = collection(db, `/artifacts/${appId}/inventory_events`);
-    const eventRef = doc(eventCollectionRef);
-    batch.set(eventRef, {
-        type: 'FINALIZE_PURCHASE', timestamp: stockInTimestamp, purchaseInvoiceId: purchaseInvoiceId,
-        itemCount: snapshot.docs.length,
-    });
-
-    await batch.commit();
-};
 
 /**
  * Sells stock using a transaction, ensuring atomicity.

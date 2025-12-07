@@ -5,7 +5,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import localforage from 'localforage';
 import { useAuth } from './AuthContext';
 import { useLoading } from './LoadingContext';
-import { handleStockIn, handleStockOut, handleTransfer } from '../firebase/inventory_services.js'; // Import handleTransfer
+import { handleStockOut, handleTransfer } from '../firebase/inventory_services.js';
 
 const SyncContext = createContext();
 
@@ -66,9 +66,6 @@ export const SyncProvider = ({ children }) => {
                 const { operationData, userId, user } = action.payload;
 
                 switch (action.type) {
-                    case 'RECEIVE_STOCK':
-                        await handleStockIn(db, appId, userId, user, operationData);
-                        break;
                     case 'STOCK_OUT':
                         await handleStockOut(db, appId, userId, user, operationData);
                         break;

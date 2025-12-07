@@ -3,6 +3,7 @@
 
 import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import { useAuth } from './AuthContext';
+import { useUser } from './UserContext'; // Correctly import useUser
 import {
     collection,
     onSnapshot,
@@ -10,7 +11,6 @@ import {
     doc,
     updateDoc,
     deleteDoc,
-    runTransaction,
     serverTimestamp
 } from 'firebase/firestore';
 
@@ -18,8 +18,28 @@ const PurchaseInvoiceContext = createContext();
 
 export const usePurchaseInvoices = () => useContext(PurchaseInvoiceContext);
 
+// Helper function to generate the invoice number
+const generateInvoiceNumber = (invoiceDate) => {
+    const d = invoiceDate.toDate ? invoiceDate.toDate() : new Date(invoiceDate);
+    
+    const year = d.getFullYear();
+    const month = (d.getMonth() + 1).toString().padStart(2, '0');
+    const day = d.getDate().toString().padStart(2, '0');
+
+    const now = new Date();
+    const hours = now.getHours().toString().padStart(2, '0');
+    const minutes = now.getMinutes().toString().padStart(2, '0');
+    
+    const dateStr = `${year}${month}${day}`;
+    const timeStr = `${hours}${minutes}`;
+    
+    return `PI-${dateStr}-${timeStr}`;
+};
+
+
 export const PurchaseInvoiceProvider = ({ children }) => {
-    const { db, appId, user } = useAuth();
+    const { db, appId } = useAuth();
+    const { currentUser } = useUser(); // Use the currentUser from UserContext
     const [invoices, setInvoices] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
 
@@ -43,41 +63,24 @@ export const PurchaseInvoiceProvider = ({ children }) => {
         return () => unsubscribe();
     }, [db, appId]);
 
-    const getNextInvoiceId = async () => {
-        if (!db || !appId) throw new Error("Database not configured");
-        const counterRef = doc(db, 'artifacts', appId, 'counters', 'purchaseInvoiceCounter');
-        const userNickname = user?.displayName?.substring(0, 3).toUpperCase() || 'SYS';
-        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-
-        try {
-            const newIdNumber = await runTransaction(db, async (transaction) => {
-                const counterDoc = await transaction.get(counterRef);
-                let nextId = 1;
-                if (counterDoc.exists()) {
-                    nextId = counterDoc.data().currentId + 1;
-                }
-                transaction.set(counterRef, { currentId: nextId }, { merge: true });
-                return nextId;
-            });
-            return `PI-${userNickname}-${dateStr}-${newIdNumber.toString().padStart(3, '0')}`;
-        } catch (error) {
-            console.error("Error generating new invoice ID: ", error);
-            throw new Error("Failed to generate a unique invoice ID.");
-        }
-    };
-
     const addInvoice = useCallback(async (invoiceData) => {
         if (!db || !appId) throw new Error("Database not configured");
+        if (!invoiceData.invoiceDate) throw new Error("Invoice date is required to generate an invoice number.");
+        
         const invoicesCollectionRef = collection(db, 'artifacts', appId, 'purchaseInvoices');
-        const newId = await getNextInvoiceId();
+        
+        const newInvoiceNumber = generateInvoiceNumber(invoiceData.invoiceDate);
+        
         const newInvoice = {
             ...invoiceData,
-            referenceNumber: newId,
+            invoiceNumber: newInvoiceNumber,
             status: 'pending',
             createdAt: serverTimestamp(),
+            createdBy: currentUser?.uid || null, // Storing the UID of the creator
+            createdByName: currentUser?.displayName || 'N/A' // CORRECT: Using currentUser.displayName
         };
         return await addDoc(invoicesCollectionRef, newInvoice);
-    }, [db, appId, user]);
+    }, [db, appId, currentUser]); // Add currentUser to dependency array
 
     const updateInvoice = useCallback(async (id, updatedData) => {
         if (!db || !appId) throw new Error("Database not configured");

@@ -33,7 +33,7 @@ const NewSupplierForm = () => {
         setAppProcessing(true, 'Saving supplier...');
         try {
             await addSupplier(supplier);
-            navigate('/purchasing/suppliers');
+            navigate('/suppliers');
         } catch (error) {
             console.error("Failed to add supplier:", error);
             // Optionally, show an error message to the user
@@ -46,7 +46,7 @@ const NewSupplierForm = () => {
         <div className="page-container">
             <header className="page-header">
                 <div>
-                    <Link to="/purchasing/suppliers" className="flex items-center text-sm font-medium text-gray-500 hover:text-gray-700 mb-2">
+                    <Link to="/suppliers" className="flex items-center text-sm font-medium text-gray-500 hover:text-gray-700 mb-2">
                         <ArrowLeft size={16} className="mr-1" />
                         Back to Suppliers
                     </Link>
@@ -132,7 +132,7 @@ const NewSupplierForm = () => {
 
                     {/* Form Actions */}
                     <div className="mt-8 pt-5 border-t border-gray-200 flex justify-end gap-3">
-                        <Link to="/purchasing/suppliers" className="btn btn-white">
+                        <Link to="/suppliers" className="btn btn-white">
                             Cancel
                         </Link>
                         <button type="submit" className="btn btn-primary">

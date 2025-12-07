@@ -11,7 +11,7 @@ const SuppliersPage = () => {
   const navigate = useNavigate();
 
   const handleRowClick = (id) => {
-    navigate(`/purchasing/suppliers/${id}`);
+    navigate(`/suppliers/${id}`);
   };
 
   if (isLoading && suppliers.length === 0) {
@@ -27,7 +27,7 @@ const SuppliersPage = () => {
       <header className="page-header">
         <h1 className="page-title">Suppliers</h1>
         <div className="page-actions">
-          <Link to="/purchasing/suppliers/new" className="btn btn-primary">
+          <Link to="/suppliers/new" className="btn btn-primary">
             <Plus size={16} className="mr-2" />
             New Supplier
           </Link>
@@ -55,7 +55,7 @@ const SuppliersPage = () => {
                     <td className= "p-3 font-medium text-gray-800">{supplier.name}</td>
                     <td className="p-3">
                       <div className="text-sm">{supplier.primaryContactPerson || 'N/A'}</div>
-                      <div className="text-xs text-gray-500">{supplier.primaryContactNumber || supplier.email}</div>
+                      <div className="text-xs text-gray-500">{supplier.email}</div>
                     </td>
                     <td className="p-3 text-center">{supplier.products || 0}</td>
                     <td className="p-3 text-center">

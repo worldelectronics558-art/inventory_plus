@@ -19,7 +19,7 @@ const EditSupplierForm = () => {
         if (supplierToEdit) {
             setSupplier(supplierToEdit);
         } else {
-            navigate('/purchasing/suppliers');
+            navigate('/suppliers');
         }
     }, [id, suppliers, navigate]);
 
@@ -33,7 +33,7 @@ const EditSupplierForm = () => {
         setAppProcessing(true, 'Updating supplier...');
         try {
             await updateSupplier(id, supplier);
-            navigate(`/purchasing/suppliers/${id}`);
+            navigate(`/suppliers/${id}`);
         } catch (error) {
             console.error("Failed to update supplier:", error);
             alert(`Error: ${error.message}`);
@@ -50,7 +50,7 @@ const EditSupplierForm = () => {
         <div className="page-container">
             <header className="page-header">
                  <div>
-                    <Link to={`/purchasing/suppliers/${id}`} className="flex items-center text-sm font-medium text-gray-500 hover:text-gray-700 mb-2">
+                    <Link to={`/suppliers/${id}`} className="flex items-center text-sm font-medium text-gray-500 hover:text-gray-700 mb-2">
                         <ArrowLeft size={16} className="mr-1" />
                         Back to Supplier Details
                     </Link>
@@ -99,7 +99,7 @@ const EditSupplierForm = () => {
                     </div>
 
                     <div className="mt-8 pt-5 border-t border-gray-200 flex justify-end gap-3">
-                         <Link to={`/purchasing/suppliers/${id}`} className="btn btn-white">
+                         <Link to={`/suppliers/${id}`} className="btn btn-white">
                             Cancel
                         </Link>
                         <button type="submit" className="btn btn-primary">

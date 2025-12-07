@@ -1,15 +1,14 @@
 
-// src/pages/PurchasingSubPages/NewPurchaseInvoiceForm.jsx
+// src/pages/PurchaseSubPages/EditPurchaseInvoiceForm.jsx
 
 import React, { useState, useMemo, useEffect } from 'react';
 import Select from 'react-select';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Save, Plus, Trash2 } from 'lucide-react';
 import { usePurchaseInvoices } from '../../contexts/PurchaseInvoiceContext.jsx';
 import { useSuppliers } from '../../contexts/SupplierContext.jsx';
 import { useProducts } from '../../contexts/ProductContext.jsx';
 import { useLoading } from '../../contexts/LoadingContext.jsx';
-import { useUser } from '../../contexts/UserContext.jsx';
 import { getProductDisplayName } from '../../utils/productUtils.js';
 
 // --- STYLING & CONSTANTS ---
@@ -22,60 +21,62 @@ const customSelectStyles = {
     menuPortal: (b) => ({ ...b, zIndex: 9999 })
 };
 
-const NewPurchaseInvoiceForm = () => {
+const EditPurchaseInvoiceForm = () => {
+    const { id } = useParams();
     const navigate = useNavigate();
-    const { addInvoice, getNextInvoiceNumber } = usePurchaseInvoices();
+    const { invoices, updateInvoice } = usePurchaseInvoices();
     const { suppliers } = useSuppliers();
     const { products } = useProducts();
     const { setAppProcessing } = useLoading();
-    const { currentUser } = useUser();
 
     // --- STATE MANAGEMENT ---
-    const [invoiceNumber, setInvoiceNumber] = useState('');
+    const [invoice, setInvoice] = useState(null);
     const [supplierId, setSupplierId] = useState(null);
-    const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10));
+    const [invoiceDate, setInvoiceDate] = useState('');
     const [documentNumber, setDocumentNumber] = useState('');
     const [notes, setNotes] = useState('');
-    const [items, setItems] = useState([{ 
-        productId: null, 
-        quantity: 1, 
-        unitCost: 0, 
-        price: 0,      
-        tax: 0         
-    }]);
-
-    // --- GENERATE INVOICE NUMBER ---
-    useEffect(() => {
-        const generateInvoiceNumber = async () => {
-            if (currentUser && currentUser.displayName) {
-                const nickname = currentUser.displayName.split(' ').map(n => n[0]).join('').toUpperCase();
-                const nextNumber = await getNextInvoiceNumber();
-                const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-                setInvoiceNumber(`PI-${nickname}-${date}-${String(nextNumber).padStart(3, '0')}`);
-            }
-        };
-        generateInvoiceNumber();
-    }, [currentUser, getNextInvoiceNumber]);
-
+    const [items, setItems] = useState([]);
 
     // --- MEMOIZED OPTIONS FOR SELECTS ---
     const supplierOptions = useMemo(() => 
-        suppliers
-            .filter(s => s.id && s.name)
-            .map(s => ({ value: s.id, label: s.name })), 
+        suppliers.map(s => ({ value: s.id, label: s.name })), 
         [suppliers]
     );
 
     const productOptions = useMemo(() => 
-        products
-            .filter(p => p.sku)
-            .map(p => ({ 
-                value: p.sku,
-                label: getProductDisplayName(p), 
-                purchasePrice: p.purchasePrice ?? 0
-            })), 
+        products.map(p => ({ 
+            value: p.sku,
+            label: getProductDisplayName(p), 
+            purchasePrice: p.purchasePrice ?? 0
+        })), 
         [products]
     );
+    
+    // --- LOAD INVOICE DATA ---
+    useEffect(() => {
+        const invoiceToEdit = invoices.find(inv => inv.id === id);
+        if (invoiceToEdit) {
+            setInvoice(invoiceToEdit);
+            const supplierOption = supplierOptions.find(s => s.value === invoiceToEdit.supplierId);
+            setSupplierId(supplierOption);
+            setInvoiceDate(new Date(invoiceToEdit.invoiceDate.seconds * 1000).toISOString().slice(0, 10));
+            setDocumentNumber(invoiceToEdit.documentNumber || '');
+            setNotes(invoiceToEdit.notes || '');
+            
+            const loadedItems = invoiceToEdit.items.map(item => {
+                const productOption = productOptions.find(p => p.value === item.productId);
+                return {
+                    ...item,
+                    productId: productOption,
+                };
+            });
+            setItems(loadedItems);
+
+        } else if(invoices.length > 0) { // If invoices are loaded but this one is not found
+            console.error("Invoice not found");
+            navigate('/purchase');
+        }
+    }, [id, invoices, supplierOptions, productOptions, navigate]);
 
     // --- HANDLERS ---
     const handleItemChange = (index, field, value) => {
@@ -139,12 +140,11 @@ const NewPurchaseInvoiceForm = () => {
             return;
         }
 
-        setAppProcessing(true, 'Creating invoice...');
+        setAppProcessing(true, 'Updating invoice...');
 
         const { totalPreTax, totalTax, grandTotal } = totals;
 
-        const invoiceData = {
-            invoiceNumber, // Add this
+        const updatedInvoiceData = {
             supplierId: supplierId.value,
             supplierName: supplierId.label,
             invoiceDate: new Date(invoiceDate),
@@ -160,40 +160,43 @@ const NewPurchaseInvoiceForm = () => {
             })),
             totalPreTax, 
             totalTax,
-            totalAmount: grandTotal, 
+            totalAmount: grandTotal,
         };
 
         try {
-            await addInvoice(invoiceData);
-            navigate('/purchasing');
+            await updateInvoice(id, updatedInvoiceData);
+            navigate('/purchase');
         } catch (error) {
-            console.error("Failed to create invoice:", error);
+            console.error("Failed to update invoice:", error);
             alert(`Error: ${error.message}`);
         } finally {
             setAppProcessing(false);
         }
     };
+    
+    if (!invoice) {
+        return <div className="page-container text-center">Loading invoice data...</div>;
+    }
 
     return (
         <div className="page-container">
             <header className="page-header">
                  <div>
-                    <Link to="/purchasing" className="flex items-center text-sm font-medium text-gray-500 hover:text-gray-700 mb-2">
+                    <Link to="/purchase" className="flex items-center text-sm font-medium text-gray-500 hover:text-gray-700 mb-2">
                         <ArrowLeft size={16} className="mr-1" />
                         Back to Purchase Invoices
                     </Link>
-                    <h1 className="page-title">New Purchase Invoice</h1>
+                    <h1 className="page-title">Edit Purchase Invoice {invoice.invoiceNumber}</h1>
                 </div>
             </header>
 
             <div className="page-content">
                 <form onSubmit={handleSubmit}>
-                    {/* --- Main Invoice Details Card --- */}
                     <div className="card p-6 mb-6">
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                              <div>
-                                <label htmlFor="invoiceNumber">Invoice Number</label>
-                                <input type="text" id="invoiceNumber" value={invoiceNumber} className="input-base bg-gray-100" placeholder='Generated automatically' readOnly />
+                                <label>Invoice Number</label>
+                                <input type="text" value={invoice.invoiceNumber} className="input-base bg-gray-100" readOnly />
                             </div>
                             <div>
                                 <label htmlFor="supplierId">Supplier *</label>
@@ -210,7 +213,6 @@ const NewPurchaseInvoiceForm = () => {
                         </div>
                     </div>
 
-                    {/* --- Invoice Items Card --- */}
                     <div className="card p-6">
                         <h4 className="text-lg font-semibold mb-2">Invoice Items</h4>
                         <div className="grid grid-cols-12 gap-4 items-center mb-2 px-2 pb-2 border-b font-semibold text-sm text-gray-600">
@@ -256,7 +258,6 @@ const NewPurchaseInvoiceForm = () => {
                         </button>
                     </div>
 
-                    {/* --- Notes and Summary --- */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
                         <div className="lg:col-span-1 card p-6">
                              <label htmlFor="notes">Notes</label>
@@ -281,12 +282,11 @@ const NewPurchaseInvoiceForm = () => {
                         </div>
                     </div>
 
-                    {/* --- Form Actions --- */}
                     <div className="mt-8 pt-5 border-t border-gray-200 flex justify-end gap-3">
-                        <Link to="/purchasing" className="btn btn-white">Cancel</Link>
+                        <Link to="/purchase" className="btn btn-white">Cancel</Link>
                         <button type="submit" className="btn btn-primary">
                             <Save size={16} className="mr-2" />
-                            Save Invoice
+                            Update Invoice
                         </button>
                     </div>
                 </form>
@@ -295,4 +295,4 @@ const NewPurchaseInvoiceForm = () => {
     );
 };
 
-export default NewPurchaseInvoiceForm;
+export default EditPurchaseInvoiceForm;

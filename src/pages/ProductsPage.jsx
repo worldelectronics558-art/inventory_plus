@@ -18,6 +18,7 @@ import 'jspdf-autotable';
 
 // AG Grid Imports
 import { AgGridReact } from 'ag-grid-react';
+import { themeQuartz } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community'; 
 
 // Register all Community features
@@ -294,13 +295,14 @@ const ProductsPage = () => {
           <div className="bg-white shadow overflow-hidden rounded-lg">
             <div className="ag-theme-indigo" style={{ width: '100%', height: 600 }}>
                 <AgGridReact
+                    theme={themeQuartz}
                     rowData={filteredProducts}
                     columnDefs={columnDefs}
                     defaultColDef={defaultColDef}
                     pagination={true}
                     paginationPageSize={25}
                     paginationPageSizeSelector={[10, 25, 50, 100]}
-                    rowSelection={{ mode: 'multiRow' }}
+                    rowSelection={{ mode: 'singleRow' }}
                 />
             </div>
           </div>

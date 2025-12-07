@@ -11,12 +11,8 @@ const navItems = [
     { name: 'Dashboard', icon: LayoutDashboard, route: '/' },
     { name: 'Products', icon: Package, route: '/products', permission: 'canViewProducts' },
     { name: 'Inventory', icon: Warehouse, route: '/inventory', permission: 'canViewInventory' },
-    {
-        name: 'Purchasing', icon: Truck, permission: 'canViewPurchasing', subItems: [
-            { name: 'Purchase Invoices', route: '/purchasing' },
-            { name: 'Suppliers', route: '/purchasing/suppliers' },
-        ]
-    },
+    { name: 'Purchase', icon: ShoppingCart, route: '/purchase', permission: 'canViewPurchasing' },
+    { name: 'Suppliers', icon: Users, route: '/suppliers', permission: 'canViewPurchasing' },
     { name: 'Sales', icon: ShoppingCart, route: '/sales', permission: 'canViewSales' },
     { name: 'Customers', icon: Users, route: '/customers', permission: 'canViewCustomers' },
     { name: 'History', icon: History, route: '/history' },

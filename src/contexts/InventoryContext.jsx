@@ -7,7 +7,7 @@ import { collection, query, onSnapshot } from 'firebase/firestore';
 import { useAuth } from './AuthContext';
 import { useUser } from './UserContext.jsx';
 import { useSync } from './SyncContext.jsx';
-import { handleStockIn, handleStockOut, handleTransfer, handleFinalizePurchase } from '../firebase/inventory_services.js';
+import { handleStockOut, handleTransfer, handleFinalizePurchaseBatch } from '../firebase/inventory_services.js';
 
 const ITEMS_STORE_NAME = 'inventoryItemsCache';
 const inventoryItemsStore = localforage.createInstance({ name: "inventoryApp", storeName: ITEMS_STORE_NAME });
@@ -75,14 +75,6 @@ export const InventoryProvider = ({ children }) => {
         return levels;
     }, [inventoryItems]);
 
-    const receiveStock = async (operationData) => {
-        if (!isOnline) {
-            return addToQueue({ type: 'RECEIVE_STOCK', payload: { operationData, userId, user } });
-        } else {
-            return handleStockIn(db, appId, userId, user, operationData);
-        }
-    };
-
     const stockOut = async (operationData) => {
         if (!isOnline) {
             return addToQueue({ type: 'STOCK_OUT', payload: { operationData, userId, user } });
@@ -99,22 +91,22 @@ export const InventoryProvider = ({ children }) => {
         }
     };
 
-    const finalizePurchase = async (purchaseInvoiceId) => {
+    const addBatchToInventory = async (items, purchaseInvoiceId, supplierId) => {
         if (!isOnline) {
             throw new Error("Finalizing a purchase can only be done online.");
         }
-        return handleFinalizePurchase(db, appId, purchaseInvoiceId);
-    }
+        // We pass the full user object to the service
+        return handleFinalizePurchaseBatch(db, appId, userId, user, items, purchaseInvoiceId, supplierId);
+    };
 
     const contextValue = {
         inventoryItems,
         stockLevels,
         isLoading,
         isOnline,
-        receiveStock,
         stockOut,
         transfer,
-        finalizePurchase,
+        addBatchToInventory,
     };
 
     return (
