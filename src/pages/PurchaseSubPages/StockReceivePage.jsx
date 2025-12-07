@@ -1,249 +1,201 @@
 
 // src/pages/PurchaseSubPages/StockReceivePage.jsx
-import React, { useState, useMemo, useCallback } from 'react';
+
+import React, { useState, useMemo } from 'react';
 import Select from 'react-select';
+import { useNavigate, Link } from 'react-router-dom';
+import { useUser } from '../../contexts/UserContext';
 import { useProducts } from '../../contexts/ProductContext';
-import { usePendingReceivables } from '../../contexts/PendingReceivablesContext';
+import { useLocations } from '../../contexts/LocationContext';
+import { useSync } from '../../contexts/SyncContext';
 import { getProductDisplayName } from '../../utils/productUtils';
-import { Plus, Trash2, Camera, Link as LinkIcon, Save, ArrowLeft } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import Scanner from '../../components/Scanner'; // Import the new Scanner component
-import { v4 as uuidv4 } from 'uuid';
+import { Plus, ChevronLeft, Send, Camera, Pencil, X } from 'lucide-react';
+import Scanner from '../../components/Scanner';
+
+const customSelectStyles = {
+    control: (p, s) => ({ ...p, width: '100%', backgroundColor: '#fff', border: s.isFocused ? '2px solid #059669' : '1px solid #D1D5DB', borderRadius: '0.5rem', padding: '0.1rem 0', boxShadow: 'none', '&:hover': { borderColor: s.isFocused ? '#059669' : '#9CA3AF'} }),
+    menu: (p) => ({...p, zIndex: 20, backgroundColor: '#fff', border: '1px solid #D1D5DB'}),
+    option: (p, s) => ({...p, backgroundColor: s.isSelected ? '#059669' : s.isFocused ? '#D1FAE5' : 'transparent', color: s.isSelected ? 'white' : '#111827'}),
+    input: (p) => ({...p, color: '#111827'}),
+    singleValue: (p) => ({...p, color: '#111827'}),
+    menuPortal: (b) => ({ ...b, zIndex: 9999 })
+};
 
 const StockReceivePage = () => {
-    const { products, isLoading: isProductsLoading } = useProducts();
-    const { addPendingReceivables } = usePendingReceivables();
+    const navigate = useNavigate();
+    const { currentUser: user, isLoading } = useUser(); 
+    const { products } = useProducts();
+    const { locations } = useLocations();
+    const { addToQueue } = useSync();
 
-    const [receivedProducts, setReceivedProducts] = useState([]);
-    const [isScanning, setIsScanning] = useState(false);
-    const [activeProductForScan, setActiveProductForScan] = useState(null);
+    const [locationId, setLocationId] = useState('');
+    const [batchItems, setBatchItems] = useState([]);
+    const [selectedProduct, setSelectedProduct] = useState(null);
+    const [formError, setFormError] = useState('');
+    const [isScannerOpen, setIsScannerOpen] = useState(false);
+    const [scanContext, setScanContext] = useState({ itemIndex: null, serialIndex: null });
 
-    const productOptions = useMemo(() =>
-        products.map(p => ({
-            value: p.id,
-            label: getProductDisplayName(p),
-            product: p
-        })), [products]
-    );
+    const productOptions = useMemo(() => products.map(p => ({ value: p.id, label: getProductDisplayName(p), product: p })), [products]);
 
     const handleAddProduct = () => {
-        const newProduct = {
-            id: uuidv4(), // Unique key for the list item
-            productDetails: null,
-            units: []
-        };
-        setReceivedProducts(prev => [...prev, newProduct]);
-    };
-
-    const handleRemoveProduct = (productId) => {
-        setReceivedProducts(prev => prev.filter(p => p.id !== productId));
-    };
-
-    const handleProductSelect = (selectedOption, productId) => {
-        setReceivedProducts(prev => prev.map(p =>
-            p.id === productId ? { ...p, productDetails: selectedOption.product, units: [] } : p
-        ));
-    };
-
-    const handleAddUnit = (productId) => {
-        setReceivedProducts(prev => prev.map(p => {
-            if (p.id === productId) {
-                const newUnit = { id: uuidv4(), serialNumber: '' };
-                return { ...p, units: [...p.units, newUnit] };
-            }
-            return p;
-        }));
-    };
-
-    const handleUnitChange = (value, productId, unitId) => {
-        setReceivedProducts(prev => prev.map(p => {
-            if (p.id === productId) {
-                const updatedUnits = p.units.map(u => u.id === unitId ? { ...u, serialNumber: value } : u);
-                return { ...p, units: updatedUnits };
-            }
-            return p;
-        }));
-    };
-    
-    const handleRemoveUnit = (productId, unitId) => {
-        setReceivedProducts(prev => prev.map(p => {
-            if (p.id === productId) {
-                return { ...p, units: p.units.filter(u => u.id !== unitId) };
-            }
-            return p;
-        }));
-    };
-
-    const openScanner = (productId) => {
-        setActiveProductForScan(productId);
-        setIsScanning(true);
-    };
-
-    const handleScanSuccess = useCallback((decodedText) => {
-        if (!activeProductForScan) return;
-        
-        const scannedValue = decodedText.trim();
-        if (!scannedValue) return;
-
-        setReceivedProducts(prev => prev.map(p => {
-            if (p.id === activeProductForScan) {
-                if (p.units.some(u => u.serialNumber === scannedValue)) {
-                    console.warn(`Duplicate scan for ${scannedValue}. Ignoring.`);
-                    return p;
-                }
-                const newUnit = { id: uuidv4(), serialNumber: scannedValue };
-                return { ...p, units: [...p.units, newUnit] };
-            }
-            return p;
-        }));
-        
-        // The scanner now closes itself after confirmation, so we just need to update our state
-        setIsScanning(false);
-        setActiveProductForScan(null);
-
-    }, [activeProductForScan]);
-
-    const handleSubmit = async () => {
-        const itemsToSave = receivedProducts.flatMap(p => {
-            if (!p.productDetails) return [];
-            if (p.productDetails.isSerialized) {
-                return p.units
-                    .filter(u => u.serialNumber.trim() !== '')
-                    .map(u => ({ 
-                        productId: p.productDetails.id, 
-                        serialNumber: u.serialNumber.trim(),
-                        quantity: 1,
-                    }));
-            } else {
-                const totalQuantity = p.units.reduce((sum, u) => sum + (Number(u.quantity) || 0), 0);
-                if (totalQuantity <= 0) return [];
-                return [{ 
-                    productId: p.productDetails.id, 
-                    serialNumber: null,
-                    quantity: totalQuantity,
-                }];
-            }
-        });
-
-        if (itemsToSave.length === 0) {
-            alert("No valid items to save. Please add products and their units/quantities.");
+        if (!selectedProduct) return;
+        const product = selectedProduct.product;
+        if (batchItems.some(item => item.productId === product.id)) {
+            setFormError('This product is already in the batch.');
             return;
         }
+        const newItem = { id: `item_${Date.now()}`, productId: product.id, productName: product.name, sku: product.sku, cost: product.cost || 0, isSerialized: product.isSerialized, quantity: 1, serials: product.isSerialized ? [''] : [] };
+        setBatchItems(prev => [newItem, ...prev]);
+        setSelectedProduct(null);
+        setFormError('');
+    };
+
+    const handleItemUpdate = (itemId, newValues) => {
+        setBatchItems(prev => prev.map(item => item.id === itemId ? { ...item, ...newValues } : item));
+    };
+
+    const handleScanSuccess = (decodedText) => {
+        setIsScannerOpen(false);
+        const code = decodedText.trim();
+        if (!code || scanContext.itemIndex === null || scanContext.serialIndex === null) return;
+        const item = batchItems[scanContext.itemIndex];
+        const newSerials = [...item.serials];
+        newSerials[scanContext.serialIndex] = code;
+        handleItemUpdate(item.id, { serials: newSerials });
+    };
+
+    const openScannerForSerial = (itemIndex, serialIndex) => {
+        setScanContext({ itemIndex, serialIndex });
+        setIsScannerOpen(true);
+    };
+
+    const handleSaveBatch = async () => {
+        setFormError('');
+        if (!user) {
+             setFormError("Cannot save batch: User profile is not loaded or does not exist.");
+             return;
+        }
+        if (!locationId) { setFormError('You must select a receiving location.'); return; }
+        if (batchItems.length === 0) { setFormError('You must add at least one product.'); return; }
 
         try {
-            await addPendingReceivables(itemsToSave);
-            alert("Stock successfully received and saved as a pending batch!");
-            setReceivedProducts([]);
+            const itemsToQueue = batchItems.map(item => {
+                const finalSerials = item.isSerialized ? item.serials.map(s => s.trim()).filter(Boolean) : [];
+                if (item.isSerialized && finalSerials.length === 0) {
+                    throw new Error(`Product ${item.productName} requires at least one serial number.`);
+                }
+                return { productId: item.productId, productName: item.productName, sku: item.sku, isSerialized: item.isSerialized, locationId: locationId, cost: item.cost, quantity: item.isSerialized ? finalSerials.length : item.quantity, serials: finalSerials };
+            });
+            const operationData = { items: itemsToQueue };
+            await addToQueue('STOCK_IN', operationData, user);
+            alert('Batch successfully queued. It will appear in "Pending Receivables" shortly.');
+            navigate('/purchase/pending-receivables');
         } catch (error) {
-            console.error("Error saving pending receivables:", error);
-            alert(`Failed to save: ${error.message}`);
+            setFormError(`An error occurred: ${error.message}`);
         }
     };
 
-    return (
-        <div className="page-container bg-gray-50">
-             {isScanning && <Scanner onScanSuccess={handleScanSuccess} onClose={() => { setIsScanning(false); setActiveProductForScan(null); }} />}
+    if (isLoading) {
+        return (
+            <div className="page-container flex justify-center items-center">
+                <p>Loading user profile...</p>
+            </div>
+        );
+    }
+    
+    if (!user) {
+        return (
+            <div className="page-container flex justify-center items-center">
+                <p className="text-red-500">Error: Could not load user profile. Please try logging out and back in.</p>
+            </div>
+        );
+    }
 
-            <header className="page-header">
-                 <div>
-                     <Link to="/purchase" className="flex items-center text-sm font-medium text-gray-500 hover:text-gray-700 mb-1">
-                         <ArrowLeft size={16} className="mr-1" />
-                         Back to Purchase
-                     </Link>
-                     <h1 className="page-title">Receive Stock</h1>
-                 </div>
-                 <div className="page-actions">
-                     <button onClick={handleSubmit} className="btn btn-success">
-                         <Save size={18} className="mr-2" />
-                         Finish & Save Batch
-                     </button>
-                 </div>
+    return (
+        <div className="page-container mobile-form-optimized">
+            {isScannerOpen && <Scanner onScanSuccess={handleScanSuccess} onClose={() => setIsScannerOpen(false)} />}
+
+            <header className="page-header py-2">
+                <div className="flex justify-between items-center">
+                    <h1 className="page-title">Receive Stock</h1>
+                    <div className="flex items-center gap-2">
+                        <Link to="/purchase" className="btn btn-ghost"> <ChevronLeft size={20}/> Back </Link>
+                        <button onClick={handleSaveBatch} className="btn btn-primary"> <Send size={18} className="mr-2" /> Save Batch </button>
+                    </div>
+                </div>
             </header>
 
-            <div className="page-content max-w-4xl mx-auto">
-                 <div className="flex flex-col gap-4">
-                    {receivedProducts.map((prod, index) => (
-                        <div key={prod.id} className="card border-t-4 border-blue-500 shadow-md">
-                            <div className="card-body p-4">
-                                <div className="flex justify-between items-center mb-4">
-                                    <span className="font-bold text-lg text-gray-700">Product #{index + 1}</span>
-                                    <button onClick={() => handleRemoveProduct(prod.id)} className="btn btn-sm btn-icon btn-ghost text-red-500"><Trash2 size={20}/></button>
-                                </div>
+            <div className="page-content space-y-4">
+                {formError && <div className="alert alert-error text-sm"><span>{formError}</span></div>}
+                
+                <div className="form-control">
+                    <label className="label"><span className="label-text text-lg font-bold">Select Location</span></label>
+                    <select value={locationId} onChange={(e) => setLocationId(e.target.value)} className="input-base">
+                        <option value="">-- Select a Location --</option>
+                        {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
+                    </select>
+                </div>
 
-                                <Select
-                                    options={productOptions}
-                                    value={prod.productDetails ? productOptions.find(opt => opt.value === prod.productDetails.id) : null}
-                                    onChange={(opt) => handleProductSelect(opt, prod.id)}
-                                    placeholder="Search and select a product..."
-                                    isLoading={isProductsLoading}
-                                    styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }}
-                                    menuPortalTarget={document.body}
-                                    classNamePrefix="react-select"
-                                />
-                                
-                                {prod.productDetails && (
-                                    <div className="mt-4 pt-4 border-t">
-                                         <h3 className="font-semibold text-md mb-2">Units</h3>
-                                         {prod.productDetails.isSerialized ? (
-                                            <div className="flex flex-col gap-2">
-                                                {prod.units.map(unit => (
-                                                    <div key={unit.id} className="flex items-center gap-2">
-                                                        <input 
-                                                            type="text" 
-                                                            className="input-base flex-grow"
-                                                            placeholder="Enter or scan serial number..."
-                                                            value={unit.serialNumber}
-                                                            onChange={(e) => handleUnitChange(e.target.value, prod.id, unit.id)}
-                                                        />
-                                                         <button onClick={() => handleRemoveUnit(prod.id, unit.id)} className="btn btn-sm btn-icon btn-ghost text-gray-500"><Trash2 size={16}/></button>
-                                                    </div>
-                                                ))}
-                                                <div className="flex gap-2 mt-2">
-                                                     <button onClick={() => handleAddUnit(prod.id)} className="btn btn-sm btn-secondary">
-                                                         <Plus size={16} className="mr-1" /> Manual Entry
-                                                     </button>
-                                                     <button onClick={() => openScanner(prod.id)} className="btn btn-sm btn-primary">
-                                                         <Camera size={16} className="mr-1" /> Scan Unit
-                                                     </button>
-                                                </div>
-                                            </div>
-                                        ) : (
-                                            <div className="flex items-center gap-2">
-                                                <label className="font-medium">Quantity:</label>
-                                                <input 
-                                                    type="number"
-                                                    className="input-base w-32"
-                                                    min="1"
-                                                    placeholder="Total Qty..."
-                                                    value={prod.units[0]?.quantity || ''}
-                                                    onChange={(e) => {
-                                                        const newUnits = [{ id: prod.units[0]?.id || uuidv4(), quantity: e.target.value }];
-                                                        setReceivedProducts(prev => prev.map(p => p.id === prod.id ? { ...p, units: newUnits } : p));
-                                                    }}
-                                                />
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
+                <div className="form-control">
+                    <label className="label"><span className="label-text">Select Product</span></label>
+                    <div className="flex gap-2">
+                        <Select options={productOptions} value={selectedProduct} onChange={setSelectedProduct} styles={customSelectStyles} placeholder="Search for a product..." menuPortalTarget={document.body} className="flex-grow" isClearable />
+                        <button onClick={handleAddProduct} className="btn btn-primary"><Plus size={20}/></button>
+                    </div>
+                </div>
+
+                <div className="divider"></div>
+
+                <div className="space-y-3">
+                    {batchItems.map((item, index) => (
+                        <ItemCard key={item.id} item={item} onUpdate={handleItemUpdate} onScan={(serialIndex) => openScannerForSerial(index, serialIndex)} />
                     ))}
                 </div>
 
-                <div className="mt-6">
-                    <button onClick={handleAddProduct} className="btn btn-lg btn-secondary w-full border-dashed">
-                        <Plus size={20} className="mr-2" />
-                        Add Another Product
-                    </button>
-                </div>
-                 {receivedProducts.length > 0 && (
-                     <div className="mt-8 flex justify-end">
-                         <button onClick={handleSubmit} className="btn btn-success btn-lg">
-                             <Save size={20} className="mr-2" />
-                             Finish & Save Batch
-                         </button>
-                     </div>
-                 )}
+                {batchItems.length > 0 && (
+                    <div className="mt-6">
+                        <button onClick={handleSaveBatch} className="btn btn-primary btn-lg w-full"><Send size={18} className="mr-2" /> Save Batch</button>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+const ItemCard = ({ item, onUpdate, onScan }) => {
+    const handleQuantityChange = (e) => onUpdate(item.id, { quantity: Math.max(1, parseInt(e.target.value, 10) || 1) });
+    const handleSerialChange = (index, value) => {
+        const newSerials = [...item.serials];
+        newSerials[index] = value;
+        onUpdate(item.id, { serials: newSerials });
+    };
+    const addSerialField = () => onUpdate(item.id, { serials: [...item.serials, ''] });
+    const removeSerialField = (index) => onUpdate(item.id, { serials: item.serials.filter((_, i) => i !== index) });
+
+    return (
+        <div className="card bg-base-100 border shadow-md" data-item-id={item.id}>
+            <div className="card-body p-3">
+                <h3 className="font-bold text-lg">{item.productName}</h3>
+                <p className="text-md text-gray-600 font-mono">SKU: {item.sku}</p>
+                {item.isSerialized ? (
+                    <div className="space-y-2 mt-2">
+                        <label className="label-text font-semibold">Serial Numbers</label>
+                        {item.serials.map((serial, index) => (
+                             <div key={index} className="flex gap-1.5 items-center">
+                                <input type="text" value={serial} onChange={(e) => handleSerialChange(index, e.target.value)} placeholder={`Serial #${index + 1}`} className="input-base flex-grow" />
+                                <button onClick={() => onScan(index)} className="btn btn-sm btn-outline"><Camera size={16}/></button>
+                                <button onClick={(e) => e.currentTarget.previousElementSibling.previousElementSibling.focus()} className="btn btn-sm btn-outline"><Pencil size={16}/></button>
+                                <button onClick={() => removeSerialField(index)} className="btn btn-sm btn-ghost text-red-500"><X size={20}/></button>
+                            </div>
+                        ))}
+                        <button onClick={addSerialField} className="btn btn-outline btn-sm mt-2"><Plus size={16}/> Add Serial</button>
+                    </div>
+                ) : (
+                    <div className="form-control mt-2 w-32">
+                        <label className="label"><span className="label-text">Quantity</span></label>
+                        <input type="number" value={item.quantity} onChange={handleQuantityChange} className="input-base" min="1" />
+                    </div>
+                )}
             </div>
         </div>
     );

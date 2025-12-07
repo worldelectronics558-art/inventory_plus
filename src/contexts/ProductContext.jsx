@@ -134,7 +134,6 @@ export const ProductProvider = ({ children }) => {
 
     const createProduct = async (productData) => {
         if (!ensureOnline("create a new product")) return; 
-        // ... (rest of function)
         try {
             const colRef = getProductCollectionRef();
             const newProductRef = doc(colRef);
@@ -152,7 +151,6 @@ export const ProductProvider = ({ children }) => {
 
     const updateProduct = async (productId, updateData) => {
         if (!ensureOnline("edit a product")) return; 
-        // ... (rest of function)
         try {
             const productDocRef = doc(getProductCollectionRef(), productId);
             await updateDoc(productDocRef, {
@@ -167,7 +165,6 @@ export const ProductProvider = ({ children }) => {
 
     const deleteProduct = async (productId) => {
         if (!ensureOnline("delete a product")) return; 
-        // ... (rest of function)
         try {
             const productDocRef = doc(getProductCollectionRef(), productId);
             await deleteDoc(productDocRef);

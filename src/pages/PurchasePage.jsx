@@ -1,218 +1,204 @@
 
-// src/pages/PurchasePage.jsx
-import React, { useState, useMemo, useCallback } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { usePurchaseInvoices } from '../contexts/PurchaseInvoiceContext';
-import { useAuth } from '../contexts/AuthContext';
 import useMediaQuery from '../hooks/useMediaQuery';
 import PurchaseInvoiceCard from '../components/PurchaseInvoiceCard';
-import { Edit, Trash2, Eye } from 'lucide-react';
+import { Plus, Eye, Edit, CheckCircle, PackagePlus, ListChecks } from 'lucide-react';
 
+// AG Grid Imports
 import { AgGridReact } from 'ag-grid-react';
-import { themeQuartz } from 'ag-grid-community';
+import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community'; 
 
+// Register AG Grid modules
+ModuleRegistry.registerModules([AllCommunityModule]);
 
-const StatusCellRenderer = (params) => {
-    const status = params.value;
-    const statusClass = {
-        pending: 'bg-yellow-100 text-yellow-800',
-        finalized: 'bg-green-100 text-green-800',
-        cancelled: 'bg-red-100 text-red-800',
-    }[status] || 'bg-gray-100 text-gray-800';
-
-    return (
-        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${statusClass}`}>
-            {status}
-        </span>
-    );
+const defaultColDef = {
+    sortable: true,
+    filter: true,
+    resizable: true,
 };
 
-const InvoiceNumberCellRenderer = (params) => {
-    if (!params.data) return null;
+// Invoice Number Link Renderer
+const InvoiceLinkRenderer = ({ value, data }) => {
+    const navigate = useNavigate();
+    if (!value) return null;
+
     return (
-        <Link 
-            to={`/purchase/view/${params.data.id}`}
-            className="text-blue-600 hover:underline font-medium"
+        <div
+            onClick={() => navigate(`/purchase/view/${data.id}`)}
+            className="font-bold hover:underline cursor-pointer flex items-center h-full"
         >
-            {params.value}
-        </Link>
+            {value}
+        </div>
     );
 };
+
+// Action Buttons Cell Renderer
+const ActionsCellRenderer = ({ data, isMutationDisabled }) => {
+    const navigate = useNavigate();
+
+    const handleView = () => {
+        navigate(`/purchase/view/${data.id}`);
+    };
+
+    const handleEdit = () => {
+        if (data.status === 'Finalized') {
+            alert('Cannot edit a finalized invoice.');
+            return;
+        }
+        navigate(`/purchase/edit/${data.id}`);
+    };
+
+    const handleFinalize = () => {
+        navigate(`/purchase/finalize/${data.id}`);
+    };
+
+    return (
+        <div className="flex justify-center items-center h-full">
+            <button onClick={handleView} className="p-2 text-blue-600 hover:bg-blue-100 rounded-full" title="View Invoice">
+                <Eye size={16} />
+            </button>
+            <button 
+                onClick={handleEdit} 
+                className={`p-2 text-gray-600 hover:bg-gray-100 rounded-full ${data.status === 'Finalized' || isMutationDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                disabled={data.status === 'Finalized' || isMutationDisabled}
+                title={data.status === 'Finalized' ? 'Cannot edit finalized invoice' : 'Edit Invoice'}
+            >
+                <Edit size={16} />
+            </button>
+            <button 
+                onClick={handleFinalize} 
+                className={`p-2 text-green-600 hover:bg-green-100 rounded-full ${data.status === 'Finalized' || isMutationDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                disabled={data.status === 'Finalized' || isMutationDisabled}
+                title={data.status === 'Finalized' ? 'Invoice is already finalized' : 'Finalize Invoice'}
+            >
+                <CheckCircle size={16} />
+            </button>
+        </div>
+    );
+};
+
 
 const PurchasePage = () => {
     const navigate = useNavigate();
-    const { invoices, isLoading, deleteInvoice } = usePurchaseInvoices();
-    const { isOnline } = useAuth();
-    const [searchText, setSearchText] = useState('');
-    const isMobile = useMediaQuery('(max-width: 767px)');
+    const { invoices, loading, error, isMutationDisabled } = usePurchaseInvoices();
+    const [searchTerm, setSearchTerm] = useState('');
+    const isMobile = useMediaQuery('(max-width: 768px)');
 
-    const isMutationDisabled = !isOnline;
-
-    const filteredInvoices = useMemo(() => {
-        if (!searchText) return invoices;
-        const lowerSearchText = searchText.toLowerCase();
-        return invoices.filter(invoice => 
-            (invoice.invoiceNumber && invoice.invoiceNumber.toLowerCase().includes(lowerSearchText)) ||
-            (invoice.supplierName && invoice.supplierName.toLowerCase().includes(lowerSearchText)) ||
-            (invoice.status && invoice.status.toLowerCase().includes(lowerSearchText)) ||
-            (invoice.createdByName && invoice.createdByName.toLowerCase().includes(lowerSearchText))
-        );
-    }, [invoices, searchText]);
-
-    const ActionCellRenderer = useCallback((params) => {
-        const invoice = params.data;
-        const handleDelete = async (id) => {
-            if (window.confirm('Are you sure you want to delete this invoice? This action cannot be undone.')) {
-                try {
-                    await deleteInvoice(id);
-                } catch (error) {
-                    console.error("Failed to delete invoice:", error);
-                    alert(`Error: ${error.message}`);
-                }
-            }
-        };
-
-        return (
-             <div className="flex items-center justify-end h-full gap-2">
-                 {invoice.status === 'pending' ? (
-                     <>
-                        <button
-                            onClick={() => navigate(`/purchase/edit/${invoice.id}`)}
-                            className="btn btn-sm btn-icon btn-secondary"
-                            disabled={isMutationDisabled}
-                            title="Edit"
-                        >
-                            <Edit size={16} />
-                        </button>
-                        <button
-                            onClick={() => handleDelete(invoice.id)}
-                            className="btn btn-sm btn-icon btn-danger"
-                            disabled={isMutationDisabled}
-                            title="Delete"
-                        >
-                            <Trash2 size={16} />
-                        </button>
-                        <button 
-                            onClick={() => navigate(`/purchase/finalize/${invoice.id}`)} 
-                            className="btn btn-sm btn-primary"
-                            disabled={isMutationDisabled}
-                        >
-                            Finalize
-                        </button>
-                     </>
-                 ) : (
-                     <button 
-                        onClick={() => navigate(`/purchase/view/${invoice.id}`)} 
-                        className="btn btn-sm btn-icon btn-outline-secondary"
-                        title="View"
-                    >
-                         <Eye size={16}/>
-                     </button>
-                 )}
-            </div>
-        );
-    }, [navigate, isMutationDisabled, deleteInvoice]);
-
-    const columnDefs = useMemo(() => ([
+    const columnDefs = [
         { 
-            field: 'invoiceNumber',
-            headerName: 'Number',
-            filter: 'agTextColumnFilter',
-            minWidth: 150, 
-            cellRenderer: InvoiceNumberCellRenderer
+            headerName: 'Invoice #', 
+            field: 'invoiceNumber', 
+            flex: 1,
+            cellRenderer: InvoiceLinkRenderer
         },
-        { field: 'supplierName', headerName: 'Supplier', filter: 'agTextColumnFilter', minWidth: 200 },
-        {
-            field: 'invoiceDate',
-            headerName: 'Date',
-            filter: 'agDateColumnFilter',
-            valueFormatter: params => params.value?.seconds ? new Date(params.value.seconds * 1000).toLocaleDateString() : 'N/A',
-            minWidth: 120
+        { headerName: 'Supplier', field: 'supplierName', flex: 1 },
+        { 
+            headerName: 'Date', 
+            field: 'invoiceDate', 
+            flex: 1, 
+            valueFormatter: p => p.value && p.value.seconds ? new Date(p.value.seconds * 1000).toLocaleDateString() : '' 
         },
-        {
-            field: 'totalAmount',
-            headerName: 'Gross Value',
-            filter: 'agNumberColumnFilter',
-            valueFormatter: params => params.value ? `Rs ${params.value.toFixed(2)}` : 'N/A',
-            minWidth: 140,
-            cellStyle: { textAlign: 'right' }
-        },
-        { field: 'status', headerName: 'Status', cellRenderer: StatusCellRenderer, minWidth: 100 },
-        { field: 'createdByName', headerName: 'Created By', filter: 'agTextColumnFilter', minWidth: 150 },
+        { headerName: 'Total Amount', field: 'totalAmount', flex: 1, valueFormatter: p => p.value ? `$${p.value.toFixed(2)}` : '', cellStyle: { textAlign: 'right' } },
+        { headerName: 'Status', field: 'status', flex: 1 },
         {
             headerName: 'Actions',
-            cellRenderer: ActionCellRenderer,
+            cellRenderer: (params) => <ActionsCellRenderer {...params} isMutationDisabled={isMutationDisabled} />,
             sortable: false,
             filter: false,
-            minWidth: 180, 
-            pinned: 'right',
+            width: 120,
+            pinned: 'right'
         }
-    ]), [ActionCellRenderer]);
+    ];
 
-    const defaultColDef = useMemo(() => ({
-        resizable: true,
-        sortable: true,
-        suppressHeaderMenuButton: true
-    }), []);
+    const filteredInvoices = invoices.filter(invoice =>
+        (invoice.invoiceNumber?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+        (invoice.supplierName?.toLowerCase() || '').includes(searchTerm.toLowerCase())
+    );
 
-    if (isLoading) {
-        return <div className="page-container text-center">Loading invoices...</div>;
-    }
+    const renderInvoices = () => {
+        if (loading) return <p>Loading invoices...</p>;
+        if (error) return <p>Error loading invoices: {error.message}</p>;
 
-    return (
-        <div className="page-container">
-            <header className="page-header">
-                <h1 className="page-title">Purchase Invoices</h1>
-                <div className="page-actions">
-                    <button onClick={() => navigate('/purchase/new')} className="btn btn-primary" disabled={isMutationDisabled}>New Invoice</button>
-                    <button onClick={() => navigate('/purchase/receive-stock')} className="btn btn-secondary" disabled={isMutationDisabled}>Receive Stock</button>
-                </div>
-            </header>
-
-            <div className="card mb-6">
-                <div className="card-body">
-                    <input 
-                        type="text"
-                        placeholder="Search by Number, Supplier, Status, or Creator..."
-                        className="input-base w-full"
-                        value={searchText}
-                        onChange={e => setSearchText(e.target.value)}
-                    />
-                </div>
-            </div>
-
-            {filteredInvoices.length === 0 ? (
+        if (filteredInvoices.length === 0) {
+            return (
                 <div className="card text-center p-6">
                     <p className="text-gray-500">No invoices found.</p>
                     {invoices.length === 0 && (
                         <button onClick={() => navigate('/purchase/new')} className="btn btn-primary mt-4" disabled={isMutationDisabled}>
+                            <Plus className="inline-block mr-2" />
                             Create Your First Purchase Invoice
                         </button>
                     )}
                 </div>
-            ) : isMobile ? (
+            );
+        }
+
+        if (isMobile) {
+            return (
                 <div>
                     {filteredInvoices.map(invoice => (
-                        <PurchaseInvoiceCard 
+                        <PurchaseInvoiceCard
                             key={invoice.id}
                             invoice={invoice}
                             isMutationDisabled={isMutationDisabled}
                         />
                     ))}
                 </div>
-            ) : (
-                <div className="ag-theme-alpine" style={{ height: '60vh', width: '100%' }}>
-                    <AgGridReact
-                        theme={themeQuartz}
-                        rowData={filteredInvoices}
-                        columnDefs={columnDefs}
-                        defaultColDef={defaultColDef}
-                        pagination={true}
-                        paginationPageSize={15}
-                        paginationPageSizeSelector={[15, 30, 50]}
+            );
+        }
+
+        return (
+            <div className="ag-theme-indigo" style={{ height: '60vh', width: '100%' }}>
+                <AgGridReact
+                    rowData={filteredInvoices}
+                    columnDefs={columnDefs}
+                    defaultColDef={defaultColDef}
+                    pagination={true}
+                    paginationPageSize={15}
+                    paginationPageSizeSelector={[15, 30, 50]}
+                />
+            </div>
+        );
+    }
+
+    return (
+        <div className="container mx-auto p-4">
+            <div className="card mb-4">
+                <div className="flex justify-between items-center p-4">
+                  <h2 className="text-xl font-bold">Manage Purchases</h2>
+                  <div className="flex items-center gap-2">
+                        <button onClick={() => navigate('/purchase/pending-receivables')} className="btn btn-accent" disabled={isMutationDisabled}>
+                          <ListChecks size={18} className="mr-2"/>
+                          Pending Stock
+                      </button>
+                      <button onClick={() => navigate('/purchase/receive')} className="btn btn-secondary" disabled={isMutationDisabled}>
+                          <PackagePlus size={18} className="mr-2"/>
+                          Receive Stock
+                      </button>
+                      <button onClick={() => navigate('/purchase/new')} className="btn btn-primary" disabled={isMutationDisabled}>
+                          <Plus size={18} className="mr-2" />
+                          New Invoice
+                      </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 p-4">
+                    <h3 className="text-lg font-bold mb-2">Purchase Invoices ({filteredInvoices.length})</h3>
+                    <input
+                        type="text"
+                        placeholder="Search by invoice number or supplier..."
+                        className="input input-bordered w-full"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
                     />
                 </div>
-            )}
+                
+                <div className="p-4">
+                   {renderInvoices()}
+                </div>
+            </div>
         </div>
     );
 };

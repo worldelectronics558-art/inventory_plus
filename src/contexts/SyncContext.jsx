@@ -1,120 +1,129 @@
 
 // src/contexts/SyncContext.jsx
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import localforage from 'localforage';
 import { useAuth } from './AuthContext';
-import { useLoading } from './LoadingContext';
-import { handleStockOut, handleTransfer } from '../firebase/inventory_services.js';
+import { handleStockIn, handleFinalizePurchaseBatch, handleStockOut, handleTransfer } from '../firebase/inventory_services';
+
+const PENDING_WRITES_KEY = 'pending_writes';
 
 const SyncContext = createContext();
 
 export const useSync = () => useContext(SyncContext);
 
-const PENDING_WRITES_KEY = 'pendingWritesQueue';
-
 export const SyncProvider = ({ children }) => {
-    const { db, appId, isOnline } = useAuth();
-    const { setAppProcessing } = useLoading();
+    // CORRECTLY get all necessary flags from AuthContext
+    const { db, appId, isOnline, authReady, userId } = useAuth();
+    
     const [pendingWrites, setPendingWrites] = useState([]);
     const [isSyncing, setIsSyncing] = useState(false);
 
-    // Load queue from localforage on initial app load
+    const serviceFunctions = {
+        'STOCK_IN': handleStockIn,
+        'FINALIZE_PURCHASE': handleFinalizePurchaseBatch,
+        'STOCK_OUT': handleStockOut,
+        'TRANSFER': handleTransfer,
+    };
+
+    // Load pending writes from localforage on initial mount
     useEffect(() => {
-        const loadQueue = async () => {
-            try {
-                const savedQueue = await localforage.getItem(PENDING_WRITES_KEY);
-                if (savedQueue && Array.isArray(savedQueue)) {
-                    setPendingWrites(savedQueue);
-                }
-            } catch (error) {
-                console.error("Failed to load pending writes from localforage:", error);
-            }
+        const loadPending = async () => {
+            const queue = await localforage.getItem(PENDING_WRITES_KEY) || [];
+            setPendingWrites(queue);
         };
-        loadQueue();
+        loadPending();
     }, []);
 
-    // Effect to trigger sync process when the app comes online
-    useEffect(() => {
-        if (isOnline && pendingWrites.length > 0 && !isSyncing) {
-            processQueue();
+    const addToQueue = async (actionType, data, userProfile) => {
+        // This logic is now correct: it uses the reliable userId from useAuth
+        if (!userId) {
+            console.error("Cannot add to queue: userId is null or undefined from AuthContext.");
+            throw new Error("You must be authenticated to save data.");
         }
-    }, [isOnline, pendingWrites.length, isSyncing]);
 
-    const addToQueue = async (action) => {
+        const action = {
+            id: `action_${Date.now()}_${Math.random()}`,
+            type: actionType,
+            payload: {
+                operationData: data,
+                userId: userId,
+                user: { displayName: userProfile.displayName || 'System User' }
+            }
+        };
+
         console.log('Offline: Queuing action', action);
-        const newQueue = [...pendingWrites, { ...action, id: `action_${Date.now()}_${Math.random()}` }];
+        // Use a functional update to prevent race conditions
+        const newQueue = [...pendingWrites, action];
         setPendingWrites(newQueue);
         await localforage.setItem(PENDING_WRITES_KEY, newQueue);
     };
 
-    const processQueue = async () => {
-        if (isSyncing || !isOnline || pendingWrites.length === 0 || !db || !appId) {
+    // DEFINITIVE FIX: A robust, one-at-a-time queue processing logic
+    const processQueue = useCallback(async () => {
+        // --- Guard Clauses with clear logging ---
+        if (pendingWrites.length === 0) {
+            return; // Nothing to do
+        }
+        if (isSyncing) {
+            console.log("Sync skipped: Already syncing.");
+            return;
+        }
+        if (!isOnline) {
+            console.log("Sync skipped: App is offline.");
+            return;
+        }
+        if (!authReady || !db || !appId || !userId) {
+            console.log("Sync skipped: Auth or DB not ready.");
             return;
         }
 
         setIsSyncing(true);
-        setAppProcessing(true, `Syncing ${pendingWrites.length} offline change(s)...`);
+        console.log("--- Starting queue processing ---");
 
-        let remainingActions = [...pendingWrites];
-        console.log(`Starting synchronization for ${remainingActions.length} item(s)...`);
+        const actionToProcess = pendingWrites[0];
 
-        for (const action of pendingWrites) {
-            try {
-                console.log(`SYNCING: Processing action ${action.id} of type ${action.type}`);
-                
-                const { operationData, userId, user } = action.payload;
+        try {
+            const serviceFunc = serviceFunctions[actionToProcess.type];
+            if (serviceFunc) {
+                console.log(`Processing action: ${actionToProcess.id}`);
+                await serviceFunc(db, appId, actionToProcess.payload.userId, actionToProcess.payload.user, actionToProcess.payload.operationData);
 
-                switch (action.type) {
-                    case 'STOCK_OUT':
-                        await handleStockOut(db, appId, userId, user, operationData);
-                        break;
-                    case 'TRANSFER':
-                        await handleTransfer(db, appId, userId, user, operationData);
-                        break;
-                    default:
-                        console.warn(`Unknown action type in sync queue: ${action.type}`);
-                        break;
-                }
+                // SUCCESS: Remove the processed item from the queue
+                console.log(`Action ${actionToProcess.id} successful.`);
+                const newQueue = pendingWrites.slice(1);
+                setPendingWrites(newQueue);
+                await localforage.setItem(PENDING_WRITES_KEY, newQueue);
 
-                remainingActions = remainingActions.filter(item => item.id !== action.id);
-                
-            } catch (error) { 
-                console.error(`SYNC FAILED for action ${action.id}:`, error);
-                setAppProcessing(false, `Sync failed: ${error.message}. Please check console.`);
-                break; 
+            } else {
+                console.error(`No service function for action: ${actionToProcess.type}. Discarding.`);
+                // DISCARD: Remove unknown action type to prevent queue blockage
+                const newQueue = pendingWrites.slice(1);
+                setPendingWrites(newQueue);
+                await localforage.setItem(PENDING_WRITES_KEY, newQueue);
             }
+        } catch (error) {
+            // On failure, log the error but stop processing to allow for manual intervention.
+            console.error(`Failed to process action ${actionToProcess.id}. Halting queue.`, error);
+        } finally {
+            setIsSyncing(false);
+            console.log("--- Finished queue processing cycle ---");
         }
-        
-        const successfullySyncedCount = pendingWrites.length - remainingActions.length;
 
-        setPendingWrites(remainingActions);
-        await localforage.setItem(PENDING_WRITES_KEY, remainingActions);
+    }, [pendingWrites, isOnline, authReady, isSyncing, db, appId, userId]);
 
-        setIsSyncing(false);
-        if (successfullySyncedCount > 0) {
-            setAppProcessing(false, `Successfully synced ${successfullySyncedCount} item(s).`);
-        } else {
-             setAppProcessing(false);
+    // EFFECT TO TRIGGER QUEUE PROCESSING
+    // This now correctly depends on all necessary conditions.
+    useEffect(() => {
+        // Only try to process the queue if we are online and auth is ready.
+        if (isOnline && authReady && pendingWrites.length > 0) {
+            const timer = setTimeout(processQueue, 1500); // Small delay to bundle operations
+            return () => clearTimeout(timer);
         }
-       
-        console.log('Synchronization finished.');
-
-        if (successfullySyncedCount > 0) {
-            console.log(`${successfullySyncedCount} item(s) synced. Reloading to refresh data.`);
-            setTimeout(() => window.location.reload(), 1500);
-        }
-    };
-
-    const value = {
-        pendingWrites,
-        addToQueue,
-        isSyncing,
-        queueCount: pendingWrites.length,
-    };
+    }, [isOnline, authReady, pendingWrites, processQueue]);
 
     return (
-        <SyncContext.Provider value={value}>
+        <SyncContext.Provider value={{ addToQueue, pendingWritesCount: pendingWrites.length, isSyncing }}>
             {children}
         </SyncContext.Provider>
     );

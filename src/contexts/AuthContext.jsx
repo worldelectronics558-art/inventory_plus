@@ -1,15 +1,14 @@
 // src/contexts/AuthContext.jsx
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { initializeApp } from 'firebase/app';
+// CORRECT: Import the initialized services from the config file
+import { auth, db } from '../firebase/firebase-config.js'; 
 import { 
-    getAuth, 
     onAuthStateChanged, 
     signInWithCustomToken, 
     signOut as firebaseSignOut, 
     signInWithEmailAndPassword 
 } from 'firebase/auth';
-import { getFirestore, doc, onSnapshot } from 'firebase/firestore'; 
 import { invoke as tauriInvoke } from '@tauri-apps/api/core'; 
 import localforage from 'localforage'; 
 
@@ -19,7 +18,6 @@ const ALL_USERS_KEY = 'allOfflineUsers';
 
 // ----------------------------------------------------------------------
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const firebaseConfigRaw = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null; 
 const isTauriAvailable = typeof tauriInvoke === 'function' && tauriInvoke !== null;
 
@@ -29,9 +27,6 @@ const AuthContext = createContext({
     isAuthenticated: false,
     authReady: false,
     appId: appId,
-    auth: null,
-    secondaryAuth: null, // For user creation
-    db: null,
     isOnline: false,
     isNetworkAvailable: true,
     goOnline: () => {}, 
@@ -43,18 +38,15 @@ const AuthContext = createContext({
 export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider = ({ children }) => {
-    const [auth, setAuth] = useState(null);
-    const [secondaryAuth, setSecondaryAuth] = useState(null);
-    const [db, setDb] = useState(null); 
+    // REMOVED: Redundant state for auth, db, secondaryAuth, and isFirebaseInitialized
     
     const [userId, setUserId] = useState(null);
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [authReady, setAuthReady] = useState(false);
-    const [isFirebaseInitialized, setIsFirebaseInitialized] = useState(false);
     const [isManualOnlineMode, setIsManualOnlineMode] = useState(true);
     const [isNetworkAvailable, setIsNetworkAvailable] = useState(navigator.onLine);
 
-    // --- 1. Initialization (Run once) ---
+    // --- 1. Network Listener (simplified) ---
     useEffect(() => {
         const handleOnline = () => setIsNetworkAvailable(true);
         const handleOffline = () => setIsNetworkAvailable(false);
@@ -62,59 +54,15 @@ export const AuthProvider = ({ children }) => {
         window.addEventListener('online', handleOnline);
         window.addEventListener('offline', handleOffline);
 
-        if (!firebaseConfigRaw) {
-            console.error("Firebase Config Error: __firebase_config is missing.");
-            setAuthReady(true);
-            return;
-        }
-
-        let config;
-        try {
-            config = typeof firebaseConfigRaw === 'string' ? JSON.parse(firebaseConfigRaw) : firebaseConfigRaw;
-        } catch (error) {
-            console.error("Firebase Config Error: Failed to parse __firebase_config. ", error);
-            setAuthReady(true);
-            return;
-        }
-
-        try {
-            const defaultApp = initializeApp(config);
-            const authInstance = getAuth(defaultApp);
-            const dbInstance = getFirestore(defaultApp); 
-            setAuth(authInstance);
-            setDb(dbInstance);
-
-            const secondaryApp = initializeApp(config, 'secondary');
-            const secondaryAuthInstance = getAuth(secondaryApp);
-            setSecondaryAuth(secondaryAuthInstance);
-
-            setIsFirebaseInitialized(true);
-        } catch (error) {
-             if (error.code === 'duplicate-app') {
-                console.warn("Firebase duplicate app initialization avoided.");
-                if (!auth) setAuth(getAuth(initializeApp(config)));
-                if (!db) setDb(getFirestore(initializeApp(config)));
-                if (!secondaryAuth) {
-                     const secondaryApp = initializeApp(config, 'secondary');
-                     setSecondaryAuth(getAuth(secondaryApp));
-                }
-            } else {
-                console.error("Firebase Initialization Error:", error);
-            }
-             if (!isFirebaseInitialized) {
-                setIsFirebaseInitialized(true);
-            }
-        }
         return () => {
             window.removeEventListener('online', handleOnline);
             window.removeEventListener('offline', handleOffline);
         };
     }, []); 
 
-    // --- 2. Initial Session Check and Listener Setup ---
+    // --- 2. Auth State Change Listener (simplified) ---
     useEffect(() => {
-        if (!isFirebaseInitialized || !auth || !db) return; 
-
+        // auth and db are now imported directly and are always available.
         let isMounted = true;
         
         const autoSignIn = async () => {
@@ -187,11 +135,11 @@ export const AuthProvider = ({ children }) => {
             isMounted = false;
             unsubscribe();
         };
-    }, [isFirebaseInitialized, auth, db, authReady, isAuthenticated, userId, isNetworkAvailable]); 
+    // Simplified dependencies: auth and db are static.
+    }, [authReady, isAuthenticated, userId, isNetworkAvailable]); 
     
     // --- 3. Manual Online/Offline Handlers ---
     const goOnline = useCallback(async () => {
-        if (!auth) throw new Error("Authentication service is not initialized.");
         const offlineUser = await localforage.getItem(CREDENTIALS_KEY);
         if (!offlineUser || !offlineUser.email || !offlineUser.password) {
             throw new Error("No cached credentials available to go online.");
@@ -204,15 +152,15 @@ export const AuthProvider = ({ children }) => {
             console.error("GO ONLINE FAILED (Firebase login):", error);
             throw new Error(`Connection failed: ${error.message}`);
         }
-    }, [auth]);
+    }, []);
 
     const goOffline = useCallback(async () => {
-        if (auth && auth.currentUser) {
+        if (auth.currentUser) {
             await firebaseSignOut(auth);
         }
         setIsManualOnlineMode(false);
         console.log("App switched to Manual Offline Mode.");
-    }, [auth]);
+    }, []);
 
     // --- 4. Sign In Handler (Used for Login Page) ---
     const signIn = useCallback(async (email, password) => {
@@ -258,12 +206,12 @@ export const AuthProvider = ({ children }) => {
             
             throw new Error("Login failed. Check connection or your previous successful login credentials.");
         }
-    }, [authReady, auth]);
+    }, [authReady]);
     
     // --- 5. Sign Out Handler (Cleaned up) ---
     const signOut = useCallback(async () => {
         try {
-            if (auth && auth.currentUser) {
+            if (auth.currentUser) {
                  await firebaseSignOut(auth);
             }
             await localforage.removeItem(CREDENTIALS_KEY);
@@ -274,15 +222,15 @@ export const AuthProvider = ({ children }) => {
         } catch (error) {
             console.error("SIGN OUT ERROR:", error);
         }
-    }, [auth]);
+    }, []);
     
     return (
         <AuthContext.Provider value={{ 
             userId, 
             isAuthenticated, 
             authReady, 
+            // Pass down the imported auth and db instances
             auth, 
-            secondaryAuth,
             db, 
             appId: appId,
             isOnline: isNetworkAvailable && isManualOnlineMode,

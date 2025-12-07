@@ -37,8 +37,9 @@ import EditPurchaseInvoiceForm from './pages/PurchaseSubPages/EditPurchaseInvoic
 import CustomerDetailsPage from './pages/CustomersSubPages/CustomerDetailsPage.jsx';
 import NewCustomerForm from './pages/CustomersSubPages/NewCustomerForm.jsx';
 import StockReceivePage from './pages/PurchaseSubPages/StockReceivePage.jsx';
-import PurchaseFinalizationPage from './pages/PurchaseSubPages/PurchaseFinalizationPage.jsx';
+import FinalizePurchaseInvoice from './pages/PurchaseSubPages/FinalizePurchaseInvoice.jsx';
 import ViewPurchaseInvoicePage from './pages/PurchaseSubPages/ViewPurchaseInvoicePage.jsx';
+import PendingReceivablesPage from './pages/PurchaseSubPages/PendingReceivablesPage.jsx';
 
 // Products Sub-Pages
 import AddProductForm from './pages/ProductsSubPages/AddProductForm.jsx';
@@ -79,7 +80,7 @@ const AppContent = () => {
 
     useEffect(() => { if (isDesktop) setMobileMenuOpen(false); }, [isDesktop]);
     
-    const mainContentClass = isDesktop ? (isSidebarCollapsed ? 'md:ml-16' : 'md:ml-64') : 'ml-0';
+    const mainContentClass = isDesktop ? (isSidebarCollapsed ? 'md:ml-16' : 'md:ml-64') : 'md:ml-64';
 
     const { isAuthenticated: isAuthContextAuthenticated, authReady } = useAuth();
     const { userPermissions, isLoading: isUserLoading } = useUser();
@@ -129,8 +130,9 @@ const AppContent = () => {
                                 <Route path="/purchase/new" element={<NewPurchaseInvoiceForm />} />
                                 <Route path="/purchase/edit/:id" element={<EditPurchaseInvoiceForm />} />
                                 <Route path="/purchase/view/:id" element={<ViewPurchaseInvoicePage />} />
-                                <Route path="/purchase/receive-stock" element={<StockReceivePage />} />
-                                <Route path="/purchase/finalize/:invoiceId" element={<PurchaseFinalizationPage />} />
+                                <Route path="/purchase/receive" element={<StockReceivePage />} />
+                                <Route path="/purchase/finalize/:invoiceId" element={<FinalizePurchaseInvoice />} />
+                                <Route path="/purchase/pending-receivables" element={<PendingReceivablesPage />} />
                                 <Route path="/suppliers" element={<SuppliersPage />} />
                                 <Route path="/suppliers/new" element={<NewSupplierForm />} />
                                 <Route path="/suppliers/:id" element={<SupplierDetailsPage />} />

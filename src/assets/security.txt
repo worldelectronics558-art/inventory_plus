@@ -1,0 +1,42 @@
+// src/firebase/firebase-config.js to be updated like this at end
+// of development in order to use .env file for keys
+
+import { initializeApp, getApps, getApp } from "firebase/app";
+import { getFirestore } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
+
+// CORRECT FOR PRODUCTION: Read from Vite's environment variables
+const firebaseConfig = {
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID,
+};
+
+// Ensure that the keys were loaded correctly
+if (!firebaseConfig.apiKey) {
+  throw new Error("Firebase API Key is missing. Check your .env file and ensure it is loaded correctly.");
+}
+
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+
+export const db = getFirestore(app);
+export const auth = getAuth(app);
+
+
+
+// index.html file to be updated like this to remove keys hardcoded in tthis file
+<!-- In index.html -->
+<head>
+  ...
+  <title>InventoryPlus</title>
+
+  <!-- DELETE THIS ENTIRE SCRIPT TAG -->
+  <script>
+    window.__firebase_config = { ... };
+    window.__app_id = "inventoryplus-app-desktop-v1"; 
+    window.__initial_auth_token = ""; 
+  </script>
+</head>

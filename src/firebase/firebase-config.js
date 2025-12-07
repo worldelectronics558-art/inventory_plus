@@ -1,24 +1,19 @@
 // src/firebase/firebase-config.js
-import { initializeApp } from "firebase/app";
+import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
-// IMPORTANT: Include the necessary auth methods
-import { getAuth } from "firebase/auth"; 
+import { getAuth } from "firebase/auth";
 
-// Your web app's Firebase configuration
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-};
+// CORRECT: Read the configuration directly from the window object injected by index.html
+const firebaseConfig = window.__firebase_config;
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
+// Ensure that firebaseConfig is available before trying to initialize
+if (!firebaseConfig) {
+  throw new Error("Firebase configuration object (window.__firebase_config) is missing. Check index.html.");
+}
 
-// Initialize services
+// Use a singleton pattern to prevent re-initialization, which is robust and safe.
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+
+// Export the initialized services
 export const db = getFirestore(app);
-export const auth = getAuth(app); 
-
-// REMOVED: The initialAuth function previously used for anonymous login is now gone.
+export const auth = getAuth(app);
