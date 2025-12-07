@@ -21,7 +21,7 @@ export default defineConfig({
     strictPort: true,
     host: true, // Needed for Tauri to access the dev server
     hmr: {
-      protocol: 'ws',
+      protocol: 'wss', // Use WebSocket Secure
     },
     https: true, // Enable HTTPS
   },
