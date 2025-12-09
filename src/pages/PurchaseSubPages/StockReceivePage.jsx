@@ -1,7 +1,7 @@
 
 // src/pages/PurchaseSubPages/StockReceivePage.jsx
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Select from 'react-select';
 import { useNavigate, Link } from 'react-router-dom';
 import { useUser } from '../../contexts/UserContext';
@@ -21,6 +21,8 @@ const customSelectStyles = {
     menuPortal: (b) => ({ ...b, zIndex: 9999 })
 };
 
+const SESSION_STORAGE_KEY = 'stockReceiveForm';
+
 const StockReceivePage = () => {
     const navigate = useNavigate();
     const { currentUser: user, isLoading } = useUser(); 
@@ -28,8 +30,21 @@ const StockReceivePage = () => {
     const { locations } = useLocations();
     const { addToQueue } = useSync();
 
-    const [locationId, setLocationId] = useState('');
-    const [batchItems, setBatchItems] = useState([]);
+    const [formState, setFormState] = useState(() => {
+        const savedState = sessionStorage.getItem(SESSION_STORAGE_KEY);
+        return savedState ? JSON.parse(savedState) : { locationId: '', batchItems: [] };
+    });
+
+    const { locationId, batchItems } = formState;
+
+    useEffect(() => {
+        sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(formState));
+    }, [formState]);
+
+    const updateForm = (field, value) => {
+        setFormState(prevState => ({ ...prevState, [field]: value }));
+    };
+
     const [selectedProduct, setSelectedProduct] = useState(null);
     const [formError, setFormError] = useState('');
     const [isScannerOpen, setIsScannerOpen] = useState(false);
@@ -45,13 +60,14 @@ const StockReceivePage = () => {
             return;
         }
         const newItem = { id: `item_${Date.now()}`, productId: product.id, productName: product.name, sku: product.sku, cost: product.cost || 0, isSerialized: product.isSerialized, quantity: 1, serials: product.isSerialized ? [''] : [] };
-        setBatchItems(prev => [newItem, ...prev]);
+        updateForm('batchItems', [newItem, ...batchItems]);
         setSelectedProduct(null);
         setFormError('');
     };
 
     const handleItemUpdate = (itemId, newValues) => {
-        setBatchItems(prev => prev.map(item => item.id === itemId ? { ...item, ...newValues } : item));
+        const newBatchItems = batchItems.map(item => item.id === itemId ? { ...item, ...newValues } : item);
+        updateForm('batchItems', newBatchItems);
     };
 
     const handleScanSuccess = (decodedText) => {
@@ -86,8 +102,10 @@ const StockReceivePage = () => {
                 }
                 return { productId: item.productId, productName: item.productName, sku: item.sku, isSerialized: item.isSerialized, locationId: locationId, cost: item.cost, quantity: item.isSerialized ? finalSerials.length : item.quantity, serials: finalSerials };
             });
-            const operationData = { items: itemsToQueue };
-            await addToQueue('STOCK_IN', operationData, user);
+            
+            await addToQueue('STOCK_IN', itemsToQueue, user);
+            
+            sessionStorage.removeItem(SESSION_STORAGE_KEY);
             alert('Batch successfully queued. It will appear in "Pending Receivables" shortly.');
             navigate('/purchase/pending-receivables');
         } catch (error) {
@@ -115,13 +133,11 @@ const StockReceivePage = () => {
         <div className="page-container mobile-form-optimized">
             {isScannerOpen && <Scanner onScanSuccess={handleScanSuccess} onClose={() => setIsScannerOpen(false)} />}
 
-            <header className="page-header py-2">
-                <div className="flex justify-between items-center">
-                    <h1 className="page-title">Receive Stock</h1>
-                    <div className="flex items-center gap-2">
-                        <Link to="/purchase" className="btn btn-ghost"> <ChevronLeft size={20}/> Back </Link>
-                        <button onClick={handleSaveBatch} className="btn btn-primary"> <Send size={18} className="mr-2" /> Save Batch </button>
-                    </div>
+            <header className="page-header">
+                <h1 className="page-title">Receive Stock</h1>
+                <div className="page-actions">
+                    <Link to="/purchase" className="btn btn-ghost"> <ChevronLeft size={20}/> Back </Link>
+                    <button onClick={handleSaveBatch} className="btn btn-primary"> <Send size={18} className="mr-2" /> Save Batch </button>
                 </div>
             </header>
 
@@ -130,7 +146,7 @@ const StockReceivePage = () => {
                 
                 <div className="form-control">
                     <label className="label"><span className="label-text text-lg font-bold">Select Location</span></label>
-                    <select value={locationId} onChange={(e) => setLocationId(e.target.value)} className="input-base">
+                    <select value={locationId} onChange={(e) => updateForm('locationId', e.target.value)} className="input-base">
                         <option value="">-- Select a Location --</option>
                         {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
                     </select>

@@ -5,6 +5,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import localforage from 'localforage';
 import { useAuth } from './AuthContext';
 import { handleStockIn, handleFinalizePurchaseBatch, handleStockOut, handleTransfer } from '../firebase/inventory_services';
+import { generateBatchId } from '../firebase/system_services'; // <-- 1. IMPORT BATCH ID GENERATOR
 
 const PENDING_WRITES_KEY = 'pending_writes';
 
@@ -13,7 +14,6 @@ const SyncContext = createContext();
 export const useSync = () => useContext(SyncContext);
 
 export const SyncProvider = ({ children }) => {
-    // CORRECTLY get all necessary flags from AuthContext
     const { db, appId, isOnline, authReady, userId } = useAuth();
     
     const [pendingWrites, setPendingWrites] = useState([]);
@@ -26,7 +26,6 @@ export const SyncProvider = ({ children }) => {
         'TRANSFER': handleTransfer,
     };
 
-    // Load pending writes from localforage on initial mount
     useEffect(() => {
         const loadPending = async () => {
             const queue = await localforage.getItem(PENDING_WRITES_KEY) || [];
@@ -35,92 +34,87 @@ export const SyncProvider = ({ children }) => {
         loadPending();
     }, []);
 
+    // --- 2. MODIFY addToQueue TO HANDLE BATCH ID ---
     const addToQueue = async (actionType, data, userProfile) => {
-        // This logic is now correct: it uses the reliable userId from useAuth
         if (!userId) {
-            console.error("Cannot add to queue: userId is null or undefined from AuthContext.");
+            console.error("Cannot add to queue: userId is null.");
             throw new Error("You must be authenticated to save data.");
+        }
+
+        let operationData = data;
+        // If the action is stocking in items, generate and assign a batch ID
+        if (actionType === 'STOCK_IN') {
+            if (!db || !appId) throw new Error("DB is not ready for Batch ID generation.");
+            try {
+                const batchId = await generateBatchId(db, appId);
+                // Add the batchId to every item in the array
+                operationData = data.map(item => ({ ...item, batchId }));
+                console.log(`Generated and assigned Batch ID: ${batchId}`);
+            } catch (error) {
+                console.error("Failed to generate Batch ID:", error);
+                throw new Error("Could not create a batch ID. Please try again.");
+            }
         }
 
         const action = {
             id: `action_${Date.now()}_${Math.random()}`,
             type: actionType,
             payload: {
-                operationData: data,
+                operationData: operationData, // Use the (potentially modified) data
                 userId: userId,
                 user: { displayName: userProfile.displayName || 'System User' }
             }
         };
 
-        console.log('Offline: Queuing action', action);
-        // Use a functional update to prevent race conditions
+        console.log('Queuing action', action);
         const newQueue = [...pendingWrites, action];
         setPendingWrites(newQueue);
         await localforage.setItem(PENDING_WRITES_KEY, newQueue);
+        
+        // Immediately trigger queue processing if online
+        if (isOnline) {
+            processQueue(newQueue); // Pass the most recent queue
+        }
     };
 
-    // DEFINITIVE FIX: A robust, one-at-a-time queue processing logic
-    const processQueue = useCallback(async () => {
-        // --- Guard Clauses with clear logging ---
-        if (pendingWrites.length === 0) {
-            return; // Nothing to do
-        }
-        if (isSyncing) {
-            console.log("Sync skipped: Already syncing.");
-            return;
-        }
-        if (!isOnline) {
-            console.log("Sync skipped: App is offline.");
-            return;
-        }
-        if (!authReady || !db || !appId || !userId) {
-            console.log("Sync skipped: Auth or DB not ready.");
+    const processQueue = useCallback(async (currentQueue) => {
+        const queue = currentQueue || pendingWrites;
+        if (queue.length === 0 || isSyncing || !isOnline || !authReady || !db || !appId || !userId) {
             return;
         }
 
         setIsSyncing(true);
-        console.log("--- Starting queue processing ---");
-
-        const actionToProcess = pendingWrites[0];
+        const actionToProcess = queue[0];
 
         try {
             const serviceFunc = serviceFunctions[actionToProcess.type];
             if (serviceFunc) {
-                console.log(`Processing action: ${actionToProcess.id}`);
                 await serviceFunc(db, appId, actionToProcess.payload.userId, actionToProcess.payload.user, actionToProcess.payload.operationData);
 
-                // SUCCESS: Remove the processed item from the queue
-                console.log(`Action ${actionToProcess.id} successful.`);
-                const newQueue = pendingWrites.slice(1);
+                const newQueue = queue.slice(1);
                 setPendingWrites(newQueue);
                 await localforage.setItem(PENDING_WRITES_KEY, newQueue);
 
             } else {
                 console.error(`No service function for action: ${actionToProcess.type}. Discarding.`);
-                // DISCARD: Remove unknown action type to prevent queue blockage
-                const newQueue = pendingWrites.slice(1);
+                const newQueue = queue.slice(1);
                 setPendingWrites(newQueue);
                 await localforage.setItem(PENDING_WRITES_KEY, newQueue);
             }
         } catch (error) {
-            // On failure, log the error but stop processing to allow for manual intervention.
             console.error(`Failed to process action ${actionToProcess.id}. Halting queue.`, error);
         } finally {
             setIsSyncing(false);
-            console.log("--- Finished queue processing cycle ---");
         }
 
-    }, [pendingWrites, isOnline, authReady, isSyncing, db, appId, userId]);
+    }, [isSyncing, isOnline, authReady, db, appId, userId]);
 
-    // EFFECT TO TRIGGER QUEUE PROCESSING
-    // This now correctly depends on all necessary conditions.
     useEffect(() => {
-        // Only try to process the queue if we are online and auth is ready.
-        if (isOnline && authReady && pendingWrites.length > 0) {
-            const timer = setTimeout(processQueue, 1500); // Small delay to bundle operations
+        if (isOnline && authReady && pendingWrites.length > 0 && !isSyncing) {
+            const timer = setTimeout(() => processQueue(), 1500);
             return () => clearTimeout(timer);
         }
-    }, [isOnline, authReady, pendingWrites, processQueue]);
+    }, [isOnline, authReady, pendingWrites, isSyncing, processQueue]);
 
     return (
         <SyncContext.Provider value={{ addToQueue, pendingWritesCount: pendingWrites.length, isSyncing }}>

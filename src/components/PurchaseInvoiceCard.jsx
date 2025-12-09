@@ -2,27 +2,22 @@
 // src/components/PurchaseInvoiceCard.jsx
 import React from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { usePurchaseInvoices } from '../contexts/PurchaseInvoiceContext';
-import { Edit, Trash2, Eye } from 'lucide-react';
+import { Edit, Trash2, Eye, CheckCircle } from 'lucide-react';
 
-const getStatusChipClass = (status) => {
-    switch (status) {
-        case 'pending': return 'bg-yellow-100 text-yellow-800';
-        case 'finalized': return 'bg-green-100 text-green-800';
-        case 'cancelled': return 'bg-red-100 text-red-800';
-        default: return 'bg-gray-100 text-gray-800';
-    }
+const statusStyles = {
+    Pending: 'bg-yellow-100 text-yellow-700',
+    'Partially Received': 'bg-blue-100 text-blue-700',
+    Finalized: 'bg-green-100 text-green-700',
 };
 
-const PurchaseInvoiceCard = ({ invoice, isMutationDisabled }) => {
+const PurchaseInvoiceCard = ({ invoice, deleteInvoice, isMutationDisabled }) => {
     const navigate = useNavigate();
-    const { deleteInvoice } = usePurchaseInvoices();
 
-    const handleDelete = async (e, id) => {
+    const handleDelete = async (e) => {
         e.stopPropagation(); // Prevent card click navigation
-        if (window.confirm('Are you sure you want to delete this invoice? This action cannot be undone.')) {
+        if (window.confirm(`Are you sure you want to delete invoice ${invoice.invoiceNumber}?`)) {
             try {
-                await deleteInvoice(id);
+                await deleteInvoice(invoice.id);
             } catch (error) {
                 console.error("Failed to delete invoice:", error);
                 alert(`Error: ${error.message}`);
@@ -30,17 +25,23 @@ const PurchaseInvoiceCard = ({ invoice, isMutationDisabled }) => {
         }
     };
 
-    const handleCardClick = (e) => {
-        // Prevents navigation if a button inside the card was clicked
-        if (e.target.closest('button')) {
-            return;
-        } 
-        if (invoice.status === 'pending') {
+    const handleNavigate = (e, path) => {
+        e.stopPropagation();
+        navigate(path);
+    }
+
+    const handleCardClick = () => {
+        // Default navigation: finalize if pending, otherwise view
+        if (invoice.status === 'Pending' || invoice.status === 'Partially Received') {
             navigate(`/purchase/finalize/${invoice.id}`);
         } else {
             navigate(`/purchase/view/${invoice.id}`);
         }
     }
+
+    const canBeDeleted = invoice.status === 'Pending';
+    const canBeEdited = invoice.status !== 'Finalized';
+    const canBeFinalized = invoice.status !== 'Finalized';
 
     return (
         <div 
@@ -50,57 +51,53 @@ const PurchaseInvoiceCard = ({ invoice, isMutationDisabled }) => {
             <div className="card-body p-4">
                 <div className="flex justify-between items-start">
                     <div>
-                        <Link 
-                           to={`/purchase/view/${invoice.id}`}
-                           onClick={(e) => e.stopPropagation()} // Prevent card's onClick from firing
+                        <p 
                            className="font-bold text-lg text-blue-600 hover:underline"
                         >
                             {invoice.invoiceNumber}
-                        </Link>
+                        </p>
                         <p className="text-sm text-gray-600">{invoice.supplierName}</p>
                     </div>
-                    <span className={`px-3 py-1 text-xs font-semibold rounded-full ${getStatusChipClass(invoice.status)}`}>
+                    <span className={`px-3 py-1 text-xs font-semibold rounded-full ${statusStyles[invoice.status] || 'bg-gray-100 text-gray-800'}`}>
                         {invoice.status}
                     </span>
                 </div>
                 <div className="mt-4 text-sm text-gray-700 grid grid-cols-2 gap-x-4">
                     <p><strong>Date:</strong> {invoice.invoiceDate?.seconds ? new Date(invoice.invoiceDate.seconds * 1000).toLocaleDateString() : 'N/A'}</p>
-                    <p><strong>Gross Value:</strong> <span className="font-semibold">{invoice.totalAmount ? `Rs ${invoice.totalAmount.toFixed(2)}` : 'N/A'}</span></p>
-                    <p><strong>Created By:</strong> {invoice.createdByName || 'N/A'}</p>
+                    <p><strong>Total:</strong> <span className="font-semibold">{invoice.totalAmount != null ? `$${invoice.totalAmount.toFixed(2)}` : 'N/A'}</span></p>
                 </div>
-                <div className="card-actions justify-end mt-4 gap-2">
-                     {invoice.status === 'pending' ? (
-                         <>
-                             <button 
-                                 onClick={(e) => { e.stopPropagation(); navigate(`/purchase/edit/${invoice.id}`); }}
-                                 className="btn btn-sm btn-secondary"
-                                 disabled={isMutationDisabled}
-                             >
-                                 <Edit size={16} className="mr-1"/> Edit
-                             </button>
-                             <button 
-                                 onClick={(e) => handleDelete(e, invoice.id)}
-                                 className="btn btn-sm btn-danger"
-                                 disabled={isMutationDisabled}
-                             >
-                                 <Trash2 size={16} className="mr-1"/> Delete
-                             </button>
-                             <button 
-                                 onClick={(e) => { e.stopPropagation(); navigate(`/purchase/finalize/${invoice.id}`); }}
-                                 className="btn btn-sm btn-primary"
-                                 disabled={isMutationDisabled}
-                             >
-                                 Finalize
-                             </button>
-                         </>
-                     ) : (
-                         <button 
-                            onClick={(e) => { e.stopPropagation(); navigate(`/purchase/view/${invoice.id}`); }}
-                            className="btn btn-sm btn-outline-secondary"
-                        >
-                             <Eye size={16} className="mr-1"/> View
-                         </button>
-                     )}
+                <div className="card-actions justify-end items-center mt-4 gap-2">
+                    <button 
+                        onClick={(e) => handleNavigate(e, `/purchase/view/${invoice.id}`)}
+                        className="btn btn-sm btn-ghost text-blue-600" 
+                        title="View"
+                    >
+                        <Eye size={18} />
+                    </button>
+                     <button 
+                        onClick={(e) => handleNavigate(e, `/purchase/edit/${invoice.id}`)}
+                        className={`btn btn-sm btn-ghost text-gray-600 ${!canBeEdited || isMutationDisabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+                        disabled={!canBeEdited || isMutationDisabled}
+                        title={canBeEdited ? "Edit" : "Cannot edit a finalized invoice"}
+                    >
+                        <Edit size={18} />
+                    </button>
+                     <button 
+                        onClick={handleDelete}
+                        className={`btn btn-sm btn-ghost text-red-600 ${!canBeDeleted || isMutationDisabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+                        disabled={!canBeDeleted || isMutationDisabled}
+                        title={canBeDeleted ? "Delete" : "Can only delete Pending invoices"}
+                    >
+                        <Trash2 size={18} />
+                    </button>
+                     <button 
+                        onClick={(e) => handleNavigate(e, `/purchase/finalize/${invoice.id}`)}
+                        className={`btn btn-sm btn-ghost text-green-600 ${!canBeFinalized || isMutationDisabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+                        disabled={!canBeFinalized || isMutationDisabled}
+                        title={canBeFinalized ? "Finalize" : "Invoice already finalized"}
+                    >
+                        <CheckCircle size={18} />
+                    </button>
                 </div>
             </div>
         </div>

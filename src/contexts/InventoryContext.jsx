@@ -5,9 +5,6 @@ import React, { createContext, useContext, useState, useEffect, useMemo, useCall
 import localforage from 'localforage';
 import { collection, query, onSnapshot } from 'firebase/firestore';
 import { useAuth } from './AuthContext';
-import { useUser } from './UserContext.jsx';
-import { useSync } from './SyncContext.jsx';
-import { handleStockOut, handleTransfer, handleFinalizePurchaseBatch } from '../firebase/inventory_services.js';
 
 const ITEMS_STORE_NAME = 'inventoryItemsCache';
 const inventoryItemsStore = localforage.createInstance({ name: "inventoryApp", storeName: ITEMS_STORE_NAME });
@@ -17,26 +14,26 @@ const InventoryContext = createContext();
 export const useInventory = () => useContext(InventoryContext);
 
 export const InventoryProvider = ({ children }) => {
-    const { appId, userId, authReady, db, isOnline } = useAuth();
-    const { user, isLoading: isUserContextLoading } = useUser();
-    const { addToQueue } = useSync();
-
+    const { appId, db, authReady, isOnline } = useAuth();
     const [inventoryItems, setInventoryItems] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
 
     const getInventoryItemsCollectionRef = useCallback(() => {
-        if (!appId || !db) throw new Error("Database context is not ready.");
-        return collection(db, `/artifacts/${appId}/inventory_items`);
+        if (!appId || !db) return null;
+        return collection(db, `artifacts/${appId}/inventory_items`);
     }, [appId, db]);
 
     useEffect(() => {
-        if (!authReady || !userId || !appId || !db || isUserContextLoading) return;
+        if (!authReady || !appId || !db) return;
+        
         setIsLoading(true);
 
         const loadFromCache = async () => {
             try {
                 const cachedItems = await inventoryItemsStore.getItem(ITEMS_STORE_NAME);
-                if (cachedItems) setInventoryItems(cachedItems);
+                if (cachedItems) {
+                    setInventoryItems(cachedItems);
+                }
             } catch (error) {
                 console.error("Error loading inventory from cache:", error);
             }
@@ -48,9 +45,9 @@ export const InventoryProvider = ({ children }) => {
         }
 
         const colRef = getInventoryItemsCollectionRef();
-        const q = query(colRef);
+        if (!colRef) return; // Don't proceed if the collection ref is not available
 
-        const unsubscribe = onSnapshot(q, async (snapshot) => {
+        const unsubscribe = onSnapshot(colRef, async (snapshot) => {
             const itemsList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             setInventoryItems(itemsList);
             await inventoryItemsStore.setItem(ITEMS_STORE_NAME, itemsList);
@@ -61,52 +58,38 @@ export const InventoryProvider = ({ children }) => {
         });
 
         return () => unsubscribe();
-    }, [appId, userId, authReady, db, isOnline, isUserContextLoading, getInventoryItemsCollectionRef]);
+    }, [appId, authReady, db, isOnline, getInventoryItemsCollectionRef]);
 
+    // --- REFACTORED stockLevels LOGIC ---
     const stockLevels = useMemo(() => {
         const levels = {};
+        // The new `inventory_items` collection is flat. We need to aggregate it.
+        // An item in this collection IS in stock. There is no status field.
         inventoryItems.forEach(item => {
-            if (item.status === 'in_stock') {
-                if (!levels[item.sku]) levels[item.sku] = {};
-                if (!levels[item.sku][item.location]) levels[item.sku][item.location] = 0;
-                levels[item.sku][item.location]++;
+            const { sku, locationId, isSerialized, quantity } = item;
+
+            if (!sku || !locationId) return; // Skip items without essential data
+
+            if (!levels[sku]) {
+                levels[sku] = {};
             }
+            if (!levels[sku][locationId]) {
+                levels[sku][locationId] = 0;
+            }
+
+            // For serialized items, each document is one unit.
+            // For non-serialized items, the document contains a quantity.
+            const amountToAdd = isSerialized ? 1 : (quantity || 0);
+            levels[sku][locationId] += amountToAdd;
         });
         return levels;
     }, [inventoryItems]);
 
-    const stockOut = async (operationData) => {
-        if (!isOnline) {
-            return addToQueue({ type: 'STOCK_OUT', payload: { operationData, userId, user } });
-        } else {
-            return handleStockOut(db, appId, userId, user, operationData);
-        }
-    };
-    
-    const transfer = async (operationData) => {
-        if (!isOnline) {
-            return addToQueue({ type: 'TRANSFER', payload: { operationData, userId, user } });
-        } else {
-            return handleTransfer(db, appId, userId, user, operationData);
-        }
-    };
-
-    const addBatchToInventory = async (items, purchaseInvoiceId, supplierId) => {
-        if (!isOnline) {
-            throw new Error("Finalizing a purchase can only be done online.");
-        }
-        // We pass the full user object to the service
-        return handleFinalizePurchaseBatch(db, appId, userId, user, items, purchaseInvoiceId, supplierId);
-    };
-
     const contextValue = {
-        inventoryItems,
-        stockLevels,
+        inventoryItems, // The raw, un-aggregated list of items
+        stockLevels,    // The aggregated stock counts for display
         isLoading,
         isOnline,
-        stockOut,
-        transfer,
-        addBatchToInventory,
     };
 
     return (

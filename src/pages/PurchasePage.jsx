@@ -1,14 +1,14 @@
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePurchaseInvoices } from '../contexts/PurchaseInvoiceContext';
 import useMediaQuery from '../hooks/useMediaQuery';
 import PurchaseInvoiceCard from '../components/PurchaseInvoiceCard';
-import { Plus, Eye, Edit, CheckCircle, PackagePlus, ListChecks } from 'lucide-react';
+import { Plus, Eye, Edit, Trash2, CheckCircle, PackagePlus, ListChecks } from 'lucide-react';
 
 // AG Grid Imports
 import { AgGridReact } from 'ag-grid-react';
-import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community'; 
+import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
 
 // Register AG Grid modules
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -19,11 +19,26 @@ const defaultColDef = {
     resizable: true,
 };
 
+const statusStyles = {
+    Pending: 'bg-yellow-100 text-yellow-700',
+    'Partially Received': 'bg-blue-100 text-blue-700',
+    Finalized: 'bg-green-100 text-green-700',
+};
+
+// Status Cell Renderer
+const StatusCellRenderer = ({ value }) => {
+    if (!value) return null;
+    return (
+        <span className={`px-2 py-1 font-semibold leading-tight text-xs rounded-full ${statusStyles[value] || 'bg-gray-100 text-gray-800'}`}>
+            {value}
+        </span>
+    );
+};
+
 // Invoice Number Link Renderer
 const InvoiceLinkRenderer = ({ value, data }) => {
     const navigate = useNavigate();
     if (!value) return null;
-
     return (
         <div
             onClick={() => navigate(`/purchase/view/${data.id}`)}
@@ -35,13 +50,11 @@ const InvoiceLinkRenderer = ({ value, data }) => {
 };
 
 // Action Buttons Cell Renderer
-const ActionsCellRenderer = ({ data, isMutationDisabled }) => {
+const ActionsCellRenderer = ({ data, isMutationDisabled, deleteInvoice }) => {
     const navigate = useNavigate();
 
-    const handleView = () => {
-        navigate(`/purchase/view/${data.id}`);
-    };
-
+    const handleView = () => navigate(`/purchase/view/${data.id}`);
+    
     const handleEdit = () => {
         if (data.status === 'Finalized') {
             alert('Cannot edit a finalized invoice.');
@@ -50,28 +63,49 @@ const ActionsCellRenderer = ({ data, isMutationDisabled }) => {
         navigate(`/purchase/edit/${data.id}`);
     };
 
-    const handleFinalize = () => {
-        navigate(`/purchase/finalize/${data.id}`);
+    const handleFinalize = () => navigate(`/purchase/finalize/${data.id}`);
+
+    const handleDelete = async () => {
+        if (window.confirm(`Are you sure you want to delete invoice ${data.invoiceNumber}? This action cannot be undone.`)) {
+            try {
+                await deleteInvoice(data.id);
+            } catch (error) {
+                console.error("Failed to delete invoice:", error);
+                alert(`Failed to delete invoice: ${error.message}`);
+            }
+        }
     };
 
+    const canBeDeleted = data.status === 'Pending';
+    const canBeEdited = data.status !== 'Finalized';
+    const canBeFinalized = data.status !== 'Finalized';
+
     return (
-        <div className="flex justify-center items-center h-full">
+        <div className="flex justify-center items-center h-full gap-1">
             <button onClick={handleView} className="p-2 text-blue-600 hover:bg-blue-100 rounded-full" title="View Invoice">
                 <Eye size={16} />
             </button>
             <button 
                 onClick={handleEdit} 
-                className={`p-2 text-gray-600 hover:bg-gray-100 rounded-full ${data.status === 'Finalized' || isMutationDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                disabled={data.status === 'Finalized' || isMutationDisabled}
-                title={data.status === 'Finalized' ? 'Cannot edit finalized invoice' : 'Edit Invoice'}
+                className={`p-2 text-gray-600 hover:bg-gray-100 rounded-full ${!canBeEdited || isMutationDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                disabled={!canBeEdited || isMutationDisabled}
+                title={!canBeEdited ? 'Cannot edit finalized invoice' : 'Edit Invoice'}
             >
                 <Edit size={16} />
             </button>
+             <button 
+                onClick={handleDelete}
+                className={`p-2 text-red-600 hover:bg-red-100 rounded-full ${!canBeDeleted || isMutationDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                disabled={!canBeDeleted || isMutationDisabled}
+                title={!canBeDeleted ? 'Can only delete Pending invoices' : 'Delete Invoice'}
+            >
+                <Trash2 size={16} />
+            </button>
             <button 
                 onClick={handleFinalize} 
-                className={`p-2 text-green-600 hover:bg-green-100 rounded-full ${data.status === 'Finalized' || isMutationDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                disabled={data.status === 'Finalized' || isMutationDisabled}
-                title={data.status === 'Finalized' ? 'Invoice is already finalized' : 'Finalize Invoice'}
+                className={`p-2 text-green-600 hover:bg-green-100 rounded-full ${!canBeFinalized || isMutationDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                disabled={!canBeFinalized || isMutationDisabled}
+                title={!canBeFinalized ? 'Invoice is already finalized' : 'Finalize Invoice'}
             >
                 <CheckCircle size={16} />
             </button>
@@ -82,33 +116,35 @@ const ActionsCellRenderer = ({ data, isMutationDisabled }) => {
 
 const PurchasePage = () => {
     const navigate = useNavigate();
-    const { invoices, loading, error, isMutationDisabled } = usePurchaseInvoices();
+    const { invoices, isLoading, error, isMutationDisabled, deleteInvoice } = usePurchaseInvoices();
     const [searchTerm, setSearchTerm] = useState('');
     const isMobile = useMediaQuery('(max-width: 768px)');
 
     const columnDefs = [
-        { 
-            headerName: 'Invoice #', 
-            field: 'invoiceNumber', 
-            flex: 1,
-            cellRenderer: InvoiceLinkRenderer
-        },
-        { headerName: 'Supplier', field: 'supplierName', flex: 1 },
+        { headerName: 'Invoice #', field: 'invoiceNumber', flex: 1.2, cellRenderer: InvoiceLinkRenderer },
+        { headerName: 'Supplier', field: 'supplierName', flex: 1.5 },
         { 
             headerName: 'Date', 
             field: 'invoiceDate', 
             flex: 1, 
             valueFormatter: p => p.value && p.value.seconds ? new Date(p.value.seconds * 1000).toLocaleDateString() : '' 
         },
-        { headerName: 'Total Amount', field: 'totalAmount', flex: 1, valueFormatter: p => p.value ? `$${p.value.toFixed(2)}` : '', cellStyle: { textAlign: 'right' } },
-        { headerName: 'Status', field: 'status', flex: 1 },
+        { headerName: 'Total Amount', field: 'totalAmount', flex: 1, valueFormatter: p => p.value != null ? `$${p.value.toFixed(2)}` : '', cellStyle: { textAlign: 'right' } },
+        {
+            headerName: 'Status',
+            field: 'status',
+            flex: 1,
+            cellRenderer: StatusCellRenderer,
+            cellClass: 'flex items-center'
+        },
         {
             headerName: 'Actions',
-            cellRenderer: (params) => <ActionsCellRenderer {...params} isMutationDisabled={isMutationDisabled} />,
+            cellRenderer: (params) => <ActionsCellRenderer {...params} isMutationDisabled={isMutationDisabled} deleteInvoice={deleteInvoice} />,
             sortable: false,
             filter: false,
-            width: 120,
-            pinned: 'right'
+            width: 150,
+            pinned: 'right',
+            lockPinned: true,
         }
     ];
 
@@ -118,7 +154,7 @@ const PurchasePage = () => {
     );
 
     const renderInvoices = () => {
-        if (loading) return <p>Loading invoices...</p>;
+        if (isLoading) return <p>Loading invoices...</p>;
         if (error) return <p>Error loading invoices: {error.message}</p>;
 
         if (filteredInvoices.length === 0) {
@@ -142,6 +178,7 @@ const PurchasePage = () => {
                         <PurchaseInvoiceCard
                             key={invoice.id}
                             invoice={invoice}
+                            deleteInvoice={deleteInvoice}
                             isMutationDisabled={isMutationDisabled}
                         />
                     ))}
@@ -164,11 +201,10 @@ const PurchasePage = () => {
     }
 
     return (
-        <div className="container mx-auto p-4">
-            <div className="card mb-4">
-                <div className="flex justify-between items-center p-4">
-                  <h2 className="text-xl font-bold">Manage Purchases</h2>
-                  <div className="flex items-center gap-2">
+        <div className="page-container">
+             <header className="page-header">
+                 <h1 className="page-title">Manage Purchases</h1>
+                  <div className="page-actions">
                         <button onClick={() => navigate('/purchase/pending-receivables')} className="btn btn-accent" disabled={isMutationDisabled}>
                           <ListChecks size={18} className="mr-2"/>
                           Pending Stock
@@ -182,21 +218,23 @@ const PurchasePage = () => {
                           New Invoice
                       </button>
                   </div>
-                </div>
+            </header>
 
-                <div className="mt-4 p-4">
-                    <h3 className="text-lg font-bold mb-2">Purchase Invoices ({filteredInvoices.length})</h3>
-                    <input
-                        type="text"
-                        placeholder="Search by invoice number or supplier..."
-                        className="input input-bordered w-full"
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                    />
-                </div>
-                
-                <div className="p-4">
-                   {renderInvoices()}
+            <div className="page-content">
+                <div className="card">
+                    <div className="p-4 border-b">
+                        <h3 className="card-title">Purchase Invoices ({filteredInvoices.length})</h3>
+                         <input
+                            type="text"
+                            placeholder="Search by invoice number or supplier..."
+                            className="input input-bordered w-full mt-2"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+                    <div className="p-4">
+                       {renderInvoices()}
+                    </div>
                 </div>
             </div>
         </div>

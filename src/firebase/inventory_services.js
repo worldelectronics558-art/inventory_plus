@@ -4,18 +4,20 @@
 import { collection, writeBatch, doc, serverTimestamp, runTransaction, getDocs, query, where } from "firebase/firestore";
 
 /**
- * Processes a batch stock-in operation and adds items to the pending_stock collection.
+ * Processes a batch stock-in operation and adds items to the pending_receivables collection.
  */
 export const handleStockIn = async (db, appId, userId, user, operationData) => {
-    if (!operationData || !Array.isArray(operationData.items) || operationData.items.length === 0) {
-        throw new Error("Invalid operation data: 'items' array is missing or empty.");
+    // The operationData is now the array of items itself.
+    if (!operationData || !Array.isArray(operationData) || operationData.length === 0) {
+        throw new Error("Invalid operation data: items array is missing or empty.");
     }
 
     const batch = writeBatch(db);
-    const pendingStockCollection = collection(db, `artifacts/${appId}/pending_stock`);
+    // Correcting collection name to 'pending_receivables' for consistency
+    const pendingReceivablesCollection = collection(db, `artifacts/${appId}/pending_receivables`);
 
-    operationData.items.forEach(item => {
-        const pendingDocRef = doc(pendingStockCollection);
+    operationData.forEach(item => {
+        const pendingDocRef = doc(pendingReceivablesCollection);
         if (!item.productId || !item.locationId || !item.quantity) {
             console.error("Skipping invalid item in batch:", item);
             return;
@@ -30,7 +32,8 @@ export const handleStockIn = async (db, appId, userId, user, operationData) => {
             quantity: item.quantity,
             cost: item.cost !== undefined ? item.cost : 0,
             serials: item.isSerialized ? item.serials : [],
-            status: 'pending',
+            status: 'pending', // The status of a receivable, not an inventory item
+            batchId: item.batchId, // <-- ADD THE BATCH ID
             createdAt: serverTimestamp(),
             createdBy: {
                 uid: userId,

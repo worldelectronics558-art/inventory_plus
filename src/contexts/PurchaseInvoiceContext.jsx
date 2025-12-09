@@ -3,7 +3,6 @@
 
 import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import { useAuth } from './AuthContext';
-import { useUser } from './UserContext';
 import {
     collection,
     onSnapshot,
@@ -11,28 +10,53 @@ import {
     doc,
     updateDoc,
     deleteDoc,
-    writeBatch, // Import writeBatch for transactions
-    serverTimestamp
+    writeBatch,
+    serverTimestamp,
+    runTransaction,
+    query,
+    where,
+    getDocs,
 } from 'firebase/firestore';
 
 const PurchaseInvoiceContext = createContext();
 
 export const usePurchaseInvoices = () => useContext(PurchaseInvoiceContext);
 
-const generateInvoiceNumber = (invoiceDate) => {
+const generateInvoiceNumber = async (db, appId, invoiceDate) => {
     const d = invoiceDate.toDate ? invoiceDate.toDate() : new Date(invoiceDate);
-    const year = d.getFullYear();
+    if (isNaN(d.getTime())) {
+        throw new Error("Invalid date provided for invoice number generation.");
+    }
+
+    const year = d.getFullYear().toString().slice(-2);
     const month = (d.getMonth() + 1).toString().padStart(2, '0');
-    const day = d.getDate().toString().padStart(2, '0');
-    const now = new Date();
-    const hours = now.getHours().toString().padStart(2, '0');
-    const minutes = now.getMinutes().toString().padStart(2, '0');
-    return `PI-${year}${month}${day}-${hours}${minutes}`;
+    
+    const counterId = `pi_counter_${year}${month}`;
+    const counterRef = doc(db, 'artifacts', appId, 'counters', counterId);
+
+    let nextNumber;
+    try {
+        await runTransaction(db, async (transaction) => {
+            const counterDoc = await transaction.get(counterRef);
+            if (!counterDoc.exists()) {
+                nextNumber = 1;
+                transaction.set(counterRef, { count: nextNumber });
+            } else {
+                nextNumber = counterDoc.data().count + 1;
+                transaction.update(counterRef, { count: nextNumber });
+            }
+        });
+    } catch (e) {
+        console.error("Transaction failed: ", e);
+        throw new Error("Could not generate new invoice number.");
+    }
+
+    const formattedNumber = nextNumber.toString().padStart(3, '0');
+    return `PI-${year}${month}-${formattedNumber}`;
 };
 
 export const PurchaseInvoiceProvider = ({ children }) => {
     const { db, appId } = useAuth();
-    const { currentUser } = useUser();
     const [invoices, setInvoices] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
 
@@ -53,25 +77,26 @@ export const PurchaseInvoiceProvider = ({ children }) => {
         return () => unsubscribe();
     }, [db, appId]);
 
-    const addInvoice = useCallback(async (invoiceData) => {
+    const addInvoice = useCallback(async (invoiceData, user) => {
         if (!db || !appId) throw new Error("Database not configured");
         if (!invoiceData.invoiceDate) throw new Error("Invoice date is required");
+        if (!user?.uid) throw new Error("User data is not available. Please wait and try again.");
         
         const invoicesCollectionRef = collection(db, 'artifacts', appId, 'purchaseInvoices');
-        const newInvoiceNumber = generateInvoiceNumber(invoiceData.invoiceDate);
+        const newInvoiceNumber = await generateInvoiceNumber(db, appId, invoiceData.invoiceDate);
         
         const newInvoice = {
             ...invoiceData,
             invoiceNumber: newInvoiceNumber,
-            status: 'Pending', // Changed from 'pending' for consistency
+            status: 'Pending',
             createdAt: serverTimestamp(),
             createdBy: { 
-                uid: currentUser?.uid || null,
-                name: currentUser?.displayName || 'N/A'
+                uid: user.uid,
+                name: user.displayName || 'N/A'
             },
         };
         return await addDoc(invoicesCollectionRef, newInvoice);
-    }, [db, appId, currentUser]);
+    }, [db, appId]);
 
     const updateInvoice = useCallback(async (id, updatedData) => {
         if (!db || !appId) throw new Error("Database not configured");
@@ -79,45 +104,54 @@ export const PurchaseInvoiceProvider = ({ children }) => {
         return await updateDoc(invoiceDocRef, { ...updatedData, updatedAt: serverTimestamp() });
     }, [db, appId]);
 
-    const deleteInvoice = useCallback(async (id) => {
+    const deleteInvoiceByNumber = useCallback(async (invoiceNumber) => {
         if (!db || !appId) throw new Error("Database not configured");
-        const invoiceDocRef = doc(db, 'artifacts', appId, 'purchaseInvoices', id);
-        return await deleteDoc(invoiceDocRef);
+        const invoicesCollectionRef = collection(db, 'artifacts', appId, 'purchaseInvoices');
+        const q = query(invoicesCollectionRef, where("invoiceNumber", "==", invoiceNumber));
+        const querySnapshot = await getDocs(q);
+        if (querySnapshot.empty) {
+            console.log(`Invoice with number ${invoiceNumber} not found.`);
+            return;
+        }
+        const deletePromises = querySnapshot.docs.map(d => deleteDoc(d.ref));
+        await Promise.all(deletePromises);
+        console.log(`Successfully deleted invoice(s) with number ${invoiceNumber}`);
     }, [db, appId]);
 
-    // --- NEW TRANSACTIONAL FUNCTION ---
-    const addStockItems = useCallback(async (itemsToAddToStock, invoiceId, updatedInvoiceData) => {
+    const addStockItems = useCallback(async (itemsToAddToStock, invoiceId, updatedInvoiceData, user) => {
         if (!db || !appId) throw new Error("Database not configured");
+        if (!user || !user.uid) throw new Error("User not authenticated or UID is missing");
 
         const batch = writeBatch(db);
 
-        // 1. Update the invoice
         const invoiceDocRef = doc(db, 'artifacts', appId, 'purchaseInvoices', invoiceId);
         batch.update(invoiceDocRef, { ...updatedInvoiceData, updatedAt: serverTimestamp() });
 
-        // 2. Add new items to the main inventory collection
-        const inventoryCollectionRef = collection(db, 'artifacts', appId, 'inventory');
+        const inventoryCollectionRef = collection(db, 'artifacts', appId, 'inventory_items');
         itemsToAddToStock.forEach(item => {
-            const newItemRef = doc(inventoryCollectionRef); // Creates a new doc with a unique ID
-            const { id, ...itemData } = item; // Exclude the temporary pending ID
+            const newItemRef = doc(inventoryCollectionRef);
+            const { id, createdBy, status, ...restOfItem } = item;
             batch.set(newItemRef, {
-                ...itemData,
+                ...restOfItem,
+                cost: item.cost,
+                receivedBy: createdBy,
+                authorizedBy: { 
+                    uid: user.uid,
+                    name: user.displayName || 'N/A'
+                },
                 addedAt: serverTimestamp(),
-                // Any other final inventory fields can be set here
             });
         });
 
-        // 3. Commit the atomic operation
         await batch.commit();
-
     }, [db, appId]);
 
     const value = {
         invoices,
         addInvoice,
         updateInvoice,
-        deleteInvoice,
-        addStockItems, // Export the new function
+        deleteInvoice: deleteInvoiceByNumber,
+        addStockItems,
         isLoading,
     };
 
