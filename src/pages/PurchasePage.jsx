@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePurchaseInvoices } from '../contexts/PurchaseInvoiceContext';
 import useMediaQuery from '../hooks/useMediaQuery';
@@ -8,9 +8,9 @@ import { Plus, Eye, Edit, Trash2, CheckCircle, PackagePlus, ListChecks } from 'l
 
 // AG Grid Imports
 import { AgGridReact } from 'ag-grid-react';
-import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
+import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community'; 
 
-// Register AG Grid modules
+// Register all Community features
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 const defaultColDef = {
@@ -20,9 +20,10 @@ const defaultColDef = {
 };
 
 const statusStyles = {
-    Pending: 'bg-yellow-100 text-yellow-700',
-    'Partially Received': 'bg-blue-100 text-blue-700',
-    Finalized: 'bg-green-100 text-green-700',
+    PENDING: 'bg-yellow-100 text-red-700',
+    'PARTIALLY RECEIVED': 'bg-blue-100 text-blue-700',
+    FINALIZED: 'bg-green-100 text-green-700',
+    CANCELLED: 'bg-red-100 text-red-700',
 };
 
 // Status Cell Renderer
@@ -56,7 +57,7 @@ const ActionsCellRenderer = ({ data, isMutationDisabled, deleteInvoice }) => {
     const handleView = () => navigate(`/purchase/view/${data.id}`);
     
     const handleEdit = () => {
-        if (data.status === 'Finalized') {
+        if (data.status === 'FINALIZED') {
             alert('Cannot edit a finalized invoice.');
             return;
         }
@@ -76,9 +77,9 @@ const ActionsCellRenderer = ({ data, isMutationDisabled, deleteInvoice }) => {
         }
     };
 
-    const canBeDeleted = data.status === 'Pending';
-    const canBeEdited = data.status !== 'Finalized';
-    const canBeFinalized = data.status !== 'Finalized';
+    const canBeDeleted = data.status === 'PENDING';
+    const canBeEdited = data.status !== 'FINALIZED';
+    const canBeFinalized = data.status !== 'FINALIZED';
 
     return (
         <div className="flex justify-center items-center h-full gap-1">
@@ -129,7 +130,7 @@ const PurchasePage = () => {
             flex: 1, 
             valueFormatter: p => p.value && p.value.seconds ? new Date(p.value.seconds * 1000).toLocaleDateString() : '' 
         },
-        { headerName: 'Total Amount', field: 'totalAmount', flex: 1, valueFormatter: p => p.value != null ? `$${p.value.toFixed(2)}` : '', cellStyle: { textAlign: 'right' } },
+        { headerName: 'Total Amount', field: 'totalAmount', flex: 1, valueFormatter: p => p.value != null ? `Rs ${p.value.toFixed(2)}` : '', cellStyle: { textAlign: 'right' } },
         {
             headerName: 'Status',
             field: 'status',

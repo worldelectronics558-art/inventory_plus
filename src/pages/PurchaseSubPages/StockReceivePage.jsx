@@ -1,6 +1,4 @@
 
-// src/pages/PurchaseSubPages/StockReceivePage.jsx
-
 import React, { useState, useMemo, useEffect } from 'react';
 import Select from 'react-select';
 import { useNavigate, Link } from 'react-router-dom';
@@ -8,6 +6,7 @@ import { useUser } from '../../contexts/UserContext';
 import { useProducts } from '../../contexts/ProductContext';
 import { useLocations } from '../../contexts/LocationContext';
 import { useSync } from '../../contexts/SyncContext';
+import { useLoading } from '../../contexts/LoadingContext';
 import { getProductDisplayName } from '../../utils/productUtils';
 import { Plus, ChevronLeft, Send, Camera, Pencil, X } from 'lucide-react';
 import Scanner from '../../components/Scanner';
@@ -28,7 +27,8 @@ const StockReceivePage = () => {
     const { currentUser: user, isLoading } = useUser(); 
     const { products } = useProducts();
     const { locations } = useLocations();
-    const { addToQueue } = useSync();
+    const { addToQueue, isSyncing } = useSync();
+    const { setAppProcessing } = useLoading();
 
     const [formState, setFormState] = useState(() => {
         const savedState = sessionStorage.getItem(SESSION_STORAGE_KEY);
@@ -91,6 +91,8 @@ const StockReceivePage = () => {
         if (!user) { setFormError("Cannot save batch: User profile is not loaded."); return; }
         if (!locationId) { setFormError('You must select a receiving location.'); return; }
         if (batchItems.length === 0) { setFormError('You must add at least one product.'); return; }
+        
+        setAppProcessing(true, 'Queuing receive batch...');
 
         try {
             const batchId = `batch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -99,23 +101,32 @@ const StockReceivePage = () => {
                 const product = productsMap.get(item.productId);
                 if (!product) throw new Error(`Product details for ID ${item.productId} could not be found.`);
 
-                const finalSerials = product.isSerialized ? item.serials.map(s => s.trim()).filter(Boolean) : [];
-                if (product.isSerialized && finalSerials.length === 0) {
+                const isProductSerialized = product.isSerialized || false; // Ensure boolean value
+
+                const finalSerials = isProductSerialized ? item.serials.map(s => s.trim()).filter(s => s !== '') : [];
+                
+                if (isProductSerialized && finalSerials.length === 0) {
                     throw new Error(`Product ${product.name} requires at least one serial number.`);
+                }
+                
+                if (isProductSerialized && new Set(finalSerials).size !== finalSerials.length) {
+                    throw new Error(`Duplicate serial numbers found for ${product.name}.`);
                 }
 
                 return {
                     batchId,
                     productId: product.id,
-                    productName: product.name, // Guaranteed to be correct
-                    sku: product.sku,           // Guaranteed to be correct
-                    isSerialized: product.isSerialized, // Guaranteed to be correct
+                    productName: product.name || product.sku,
+                    sku: product.sku,      
+                    isSerialized: isProductSerialized, // Use the safe boolean value
                     locationId: locationId,
-                    cost: product.cost || 0,   // Guaranteed to be correct
-                    quantity: product.isSerialized ? finalSerials.length : item.quantity,
+                    cost: product.purchasePrice || 0, 
+                    quantity: isProductSerialized ? finalSerials.length : item.quantity,
                     serials: finalSerials
                 };
             });
+            
+            if (itemsToQueue.length === 0) throw new Error("Could not form a valid batch.");
             
             await addToQueue('CREATE_PENDING_RECEIVABLE', itemsToQueue, user);
             
@@ -124,6 +135,8 @@ const StockReceivePage = () => {
             navigate('/purchase/pending-receivables');
         } catch (error) {
             setFormError(`An error occurred: ${error.message}`);
+        } finally {
+            setAppProcessing(false);
         }
     };
 
@@ -143,7 +156,7 @@ const StockReceivePage = () => {
                 <h1 className="page-title">Receive Stock</h1>
                 <div className="page-actions">
                     <Link to="/purchase" className="btn btn-ghost"> <ChevronLeft size={20}/> Back </Link>
-                    <button onClick={handleSaveBatch} className="btn btn-primary"> <Send size={18} className="mr-2" /> Save Batch </button>
+                    <button onClick={handleSaveBatch} className="btn btn-primary" disabled={isSyncing}> <Send size={18} className="mr-2" /> Save Batch </button>
                 </div>
             </header>
 
@@ -152,7 +165,7 @@ const StockReceivePage = () => {
                 
                 <div className="form-control">
                     <label className="label"><span className="label-text text-lg font-bold">Select Location</span></label>
-                    <select value={locationId} onChange={(e) => updateForm('locationId', e.target.value)} className="input-base">
+                    <select value={locationId} onChange={(e) => updateForm('locationId', e.target.value)} className="input-base" disabled={batchItems.length > 0}>
                         <option value="">-- Select a Location --</option>
                         {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
                     </select>
@@ -161,8 +174,8 @@ const StockReceivePage = () => {
                 <div className="form-control">
                     <label className="label"><span className="label-text">Select Product</span></label>
                     <div className="flex gap-2">
-                        <Select options={productOptions} value={selectedProduct} onChange={setSelectedProduct} styles={customSelectStyles} placeholder="Search for a product..." menuPortalTarget={document.body} className="flex-grow" isClearable />
-                        <button onClick={handleAddProduct} className="btn btn-primary"><Plus size={20}/></button>
+                        <Select options={productOptions} value={selectedProduct} onChange={setSelectedProduct} styles={customSelectStyles} placeholder="Search for a product..." menuPortalTarget={document.body} className="flex-grow" isDisabled={!locationId || isSyncing} isClearable />
+                        <button onClick={handleAddProduct} className="btn btn-primary" disabled={!locationId || !selectedProduct || isSyncing}><Plus size={20}/></button>
                     </div>
                 </div>
 
@@ -174,11 +187,6 @@ const StockReceivePage = () => {
                     ))}
                 </div>
 
-                {batchItems.length > 0 && (
-                    <div className="mt-6">
-                        <button onClick={handleSaveBatch} className="btn btn-primary btn-lg w-full"><Send size={18} className="mr-2" /> Save Batch</button>
-                    </div>
-                )}
             </div>
         </div>
     );
@@ -187,7 +195,7 @@ const StockReceivePage = () => {
 const ItemCard = ({ item, productsMap, onUpdate, onScan }) => {
     const product = productsMap.get(item.productId);
 
-    if (!product) return null; // Or some fallback UI
+    if (!product) return null; 
 
     const handleQuantityChange = (e) => onUpdate(item.id, { quantity: Math.max(1, parseInt(e.target.value, 10) || 1) });
     const handleSerialChange = (index, value) => {
@@ -196,12 +204,22 @@ const ItemCard = ({ item, productsMap, onUpdate, onScan }) => {
         onUpdate(item.id, { serials: newSerials });
     };
     const addSerialField = () => onUpdate(item.id, { serials: [...item.serials, ''] });
-    const removeSerialField = (index) => onUpdate(item.id, { serials: item.serials.filter((_, i) => i !== index) });
+    const removeSerialField = (index) => {
+        const newSerials = item.serials.filter((_, i) => i !== index);
+        // If removing the last field and it was empty, don't add a new one.
+        if (newSerials.length === 0 && item.serials.length === 1 && item.serials[0] !== '') {
+             onUpdate(item.id, { serials: [''] }); // Keep one empty field if all are removed
+        } else if (newSerials.length === 0) {
+            onUpdate(item.id, { serials: [''] });
+        }else {
+            onUpdate(item.id, { serials: newSerials });
+        }
+    }
 
     return (
         <div className="card bg-base-100 border shadow-md" data-item-id={item.id}>
             <div className="card-body p-3">
-                <h3 className="font-bold text-lg">{product.name}</h3>
+                <h3 className="font-bold text-lg">{product.name || product.sku}</h3>
                 <p className="text-md text-gray-600 font-mono">SKU: {product.sku}</p>
                 {product.isSerialized ? (
                     <div className="space-y-2 mt-2">
@@ -211,7 +229,7 @@ const ItemCard = ({ item, productsMap, onUpdate, onScan }) => {
                                 <input type="text" value={serial} onChange={(e) => handleSerialChange(index, e.target.value)} placeholder={`Serial #${index + 1}`} className="input-base flex-grow" />
                                 <button onClick={() => onScan(index)} className="btn btn-sm btn-outline"><Camera size={16}/></button>
                                 <button onClick={(e) => e.currentTarget.previousElementSibling.previousElementSibling.focus()} className="btn btn-sm btn-outline"><Pencil size={16}/></button>
-                                <button onClick={() => removeSerialField(index)} className="btn btn-sm btn-ghost text-red-500"><X size={20}/></button>
+                                { (item.serials.length > 1 || serial !== '') && <button onClick={() => removeSerialField(index)} className="btn btn-sm btn-ghost text-red-500"><X size={20}/></button>}
                             </div>
                         ))}
                         <button onClick={addSerialField} className="btn btn-outline btn-sm mt-2"><Plus size={16}/> Add Serial</button>

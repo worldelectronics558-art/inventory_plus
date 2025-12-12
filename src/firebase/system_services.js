@@ -3,7 +3,7 @@
 import { doc, runTransaction } from 'firebase/firestore';
 
 /**
- * Generates a unique, sequential Batch ID (BI) for stock-in operations.
+ * Generates a unique, sequential Batch ID (BI) for stock receive operations.
  * The ID is in the format BI-YYMM-NNN, where NNN resets monthly.
  * This function is transactional and uses a single-document counter model.
  * 
@@ -48,7 +48,7 @@ export const generateBatchId = async (db, appId) => {
 };
 
 /**
- * Generates a unique, sequential Delivery Batch ID (BO) for stock-out operations.
+ * Generates a unique, sequential Delivery Batch ID (BO) for stock deliver operations.
  * The ID is in the format BO-YYMM-NNN, where NNN resets monthly.
  * This function is transactional and uses a single-document counter model.
  * 

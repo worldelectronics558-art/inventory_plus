@@ -5,9 +5,9 @@ import { useNavigate, Link } from 'react-router-dom';
 import { Edit, Trash2, Eye, CheckCircle } from 'lucide-react';
 
 const statusStyles = {
-    Pending: 'bg-yellow-100 text-yellow-700',
-    'Partially Received': 'bg-blue-100 text-blue-700',
-    Finalized: 'bg-green-100 text-green-700',
+    PENDING: 'bg-yellow-100 text-yellow-700',
+    'PARTIALLY RECEIVED': 'bg-blue-100 text-blue-700',
+    FINALIZED: 'bg-green-100 text-green-700',
 };
 
 const PurchaseInvoiceCard = ({ invoice, deleteInvoice, isMutationDisabled }) => {
@@ -39,9 +39,9 @@ const PurchaseInvoiceCard = ({ invoice, deleteInvoice, isMutationDisabled }) => 
         }
     }
 
-    const canBeDeleted = invoice.status === 'Pending';
-    const canBeEdited = invoice.status !== 'Finalized';
-    const canBeFinalized = invoice.status !== 'Finalized';
+    const canBeDeleted = invoice.status === 'PENDING';
+    const canBeEdited = invoice.status !== 'FINALIZED';
+    const canBeFinalized = invoice.status !== 'FINALIZED';
 
     return (
         <div 
@@ -64,7 +64,7 @@ const PurchaseInvoiceCard = ({ invoice, deleteInvoice, isMutationDisabled }) => 
                 </div>
                 <div className="mt-4 text-sm text-gray-700 grid grid-cols-2 gap-x-4">
                     <p><strong>Date:</strong> {invoice.invoiceDate?.seconds ? new Date(invoice.invoiceDate.seconds * 1000).toLocaleDateString() : 'N/A'}</p>
-                    <p><strong>Total:</strong> <span className="font-semibold">{invoice.totalAmount != null ? `$${invoice.totalAmount.toFixed(2)}` : 'N/A'}</span></p>
+                    <p><strong>Total:</strong> <span className="font-semibold">{invoice.totalAmount != null ? `Rs ${invoice.totalAmount.toFixed(2)}` : 'N/A'}</span></p>
                 </div>
                 <div className="card-actions justify-end items-center mt-4 gap-2">
                     <button 

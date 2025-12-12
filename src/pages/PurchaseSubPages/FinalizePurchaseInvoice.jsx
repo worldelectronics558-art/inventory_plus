@@ -11,6 +11,7 @@ import { useLocations } from '../../contexts/LocationContext';
 import { useLoading } from '../../contexts/LoadingContext';
 import { useUser } from '../../contexts/UserContext';
 import { useAuth } from '../../contexts/AuthContext.jsx';
+import { useSync } from '../../contexts/SyncContext.jsx';
 
 // --- Utils & Components ---
 import { getProductDisplayName } from '../../utils/productUtils';
@@ -18,9 +19,10 @@ import { ArrowLeft, Edit, Link2, AlertTriangle, Package, ChevronDown, CheckSquar
 import LoadingSpinner from '../../components/LoadingOverlay';
 
 const statusStyles = {
-    Pending: 'bg-yellow-100 text-yellow-700',
-    'Partially Received': 'bg-blue-100 text-blue-700',
-    Finalized: 'bg-green-100 text-green-700',
+    PENDING: 'bg-yellow-100 text-yellow-700',
+    'PARTIALLY RECEIVED': 'bg-blue-100 text-blue-700',
+    FINALIZED: 'bg-green-100 text-green-700',
+    CANCELLED: 'bg-red-100',
 };
 
 const FinalizePurchaseInvoice = () => {
@@ -28,13 +30,14 @@ const FinalizePurchaseInvoice = () => {
     const navigate = useNavigate();
 
     // --- Data from Contexts ---
-    const { invoices, isLoading: invoicesLoading, addStockItems } = usePurchaseInvoices();
-    const { pendingReceivables, isLoading: receivablesLoading, removeReceivables } = usePendingReceivables();
+    const { invoices, isLoading: invoicesLoading } = usePurchaseInvoices();
+    const { pendingReceivables, isLoading: receivablesLoading } = usePendingReceivables();
     const { products, isLoading: productsLoading } = useProducts();
     const { locations, isLoading: locationsLoading } = useLocations();
     const { setAppProcessing } = useLoading();
     const { currentUser, isLoading: userLoading } = useUser();
-    const { userId } = useAuth(); // Correctly get userId from useAuth
+    const { userId } = useAuth();
+    const { addToQueue } = useSync();
 
     // --- Local State ---
     const [invoice, setInvoice] = useState(null);
@@ -168,10 +171,11 @@ const FinalizePurchaseInvoice = () => {
     const handleAttachItems = async () => {
         const selectedItems = Object.values(selectedStock);
         if (selectedItems.length === 0) return alert('No items selected.');
-        if (!userId) return alert("Authentication error: User ID not found. Please try logging in again.");
+        if (!userId || !currentUser) return alert("Authentication error: User not found. Please log in again.");
 
-        setAppProcessing(true, 'Attaching items...');
+        setAppProcessing(true, 'Queuing stock finalization...');
 
+        // Prepare updated invoice data
         const updatedInvoiceItems = JSON.parse(JSON.stringify(invoice.items));
         selectedItems.forEach(item => {
             const invoiceItem = updatedInvoiceItems.find(invItem => invItem.productId === item.sku);
@@ -181,20 +185,42 @@ const FinalizePurchaseInvoice = () => {
         });
 
         const isFullyReceived = updatedInvoiceItems.every(item => item.receivedQty >= item.quantity);
-        const newStatus = isFullyReceived ? 'Finalized' : 'Partially Received';
+        const newStatus = isFullyReceived ? 'FINALIZED' : 'PARTIALLY RECEIVED';
         
-        const originalIdsToRemove = [...new Set(selectedItems.map(item => item.originalReceivableId))];
-        
-        const userForAction = { ...currentUser, uid: userId }; // Create user object with uid property
+        const updatedInvoiceData = {
+            items: updatedInvoiceItems,
+            status: newStatus
+        };
+
+        // Prepare IDs of pending receivables to be deleted
+        const pendingReceivableIds = [...new Set(selectedItems.map(item => item.originalReceivableId))];
+
+        // Prepare items to be added to main inventory
+        const itemsToStockIn = selectedItems.map(item => {
+            const { id, originalReceivableId, productName, locationName, ...restOfItem } = item;
+            return {
+                ...restOfItem,
+                cost: item.cost || 0,
+                receivedBy: item.createdBy,
+                authorizedBy: { uid: userId, name: currentUser.displayName || 'N/A' },
+            };
+        });
 
         try {
-            await addStockItems(selectedItems, invoice.id, { items: updatedInvoiceItems, status: newStatus }, userForAction);
-            await removeReceivables(originalIdsToRemove);
-            alert(`Invoice updated to ${newStatus}`);
+            // Queue the actions
+            await addToQueue('EXECUTE_STOCK_IN', itemsToStockIn, currentUser);
+            await addToQueue('FINALIZE_PURCHASE_INVOICE', {
+                invoiceId: invoice.id,
+                updatedInvoiceData,
+                pendingReceivableIds,
+            }, currentUser);
+
+            alert(`Invoice update has been queued! Status will be: ${newStatus}`);
             navigate('/purchase');
+
         } catch (error) {
-            console.error("Failed to attach items:", error);
-            alert(`An error occurred: ${error.message}`);
+            console.error("Failed to queue finalization tasks:", error);
+            alert(`An error occurred while queueing the tasks: ${error.message}`);
         } finally {
             setAppProcessing(false);
         }
@@ -215,7 +241,7 @@ const FinalizePurchaseInvoice = () => {
                 </div>
                 <div className="page-actions">
                     <Link to={`/purchase/edit/${invoiceId}`} className="btn btn-secondary mr-2"><Edit size={16} className="mr-2"/> Edit Invoice</Link>
-                    <button onClick={handleAttachItems} className="btn btn-primary" disabled={!userId || invoice.status === 'Finalized' || totalSelectedCount === 0}>
+                    <button onClick={handleAttachItems} className="btn btn-primary" disabled={!userId || invoice.status === 'FINALIZED' || totalSelectedCount === 0}>
                         <Link2 size={18} className="mr-2" /> Attach {totalSelectedCount} Line(s)
                     </button>
                 </div>

@@ -1,23 +1,27 @@
+
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
 import { useAuth } from '../../contexts/AuthContext';
 import { ChevronLeft, Edit, AlertTriangle } from 'lucide-react';
+import LoadingOverlay from '../../components/LoadingOverlay';
 
 const statusStyles = {
-    Pending: 'text-yellow-700',
-    'Partially Received': 'text-blue-700',
-    Finalized: 'text-green-700',
+    PENDING: 'text-yellow-700',
+    'PARTIALLY RECEIVED': 'text-blue-700',
+    FINALIZED: 'text-green-700',
+    CANCELLED: 'text-red-700',
 };
 
 const statusBgStyles = {
-    Pending: 'bg-yellow-100',
-    'Partially Received': 'bg-blue-100',
-    Finalized: 'bg-green-100',
+    PENDING: 'bg-yellow-100',
+    'PARTIALLY RECEIVED': 'bg-blue-100',
+    FINALIZED: 'bg-green-100',
+    CANCELLED: 'bg-red-100',
 };
 
 const ViewPurchaseInvoicePage = () => {
-    const { id } = useParams(); 
+    const { id } = useParams();
     const navigate = useNavigate();
     const { db, appId } = useAuth();
     
@@ -34,7 +38,7 @@ const ViewPurchaseInvoicePage = () => {
             }
             
             if (!db || !appId) {
-                return;
+                return; // Wait for auth context to be ready
             }
 
             setIsLoading(true);
@@ -60,7 +64,7 @@ const ViewPurchaseInvoicePage = () => {
     }, [id, db, appId]);
 
     if (isLoading) {
-        return <div className="page-container flex justify-center items-center"><p>Loading invoice details...</p></div>;
+        return <LoadingOverlay />;
     }
 
     if (error || !invoice) {
@@ -76,8 +80,8 @@ const ViewPurchaseInvoicePage = () => {
             </div>
         );
     }
-    
-    const canBeEdited = invoice.status !== 'Finalized';
+
+    const canBeEdited = invoice.status !== 'FINALIZED' && invoice.status !== 'CANCELLED';
 
     return (
         <div className="page-container">
@@ -96,7 +100,7 @@ const ViewPurchaseInvoicePage = () => {
                         onClick={() => navigate(`/purchase/edit/${invoice.id}`)}
                         className="btn btn-secondary"
                         disabled={!canBeEdited}
-                        title={canBeEdited ? "Edit Invoice" : "Cannot edit a finalized invoice"}
+                        title={canBeEdited ? "Edit Invoice" : "Cannot edit a finalized or cancelled invoice"}
                     >
                         <Edit size={18} className="mr-2" />
                         Edit Invoice
@@ -144,7 +148,7 @@ const ViewPurchaseInvoicePage = () => {
                                         <th>Product</th>
                                         <th className="text-right">Ordered</th>
                                         <th className="text-right">Received</th>
-                                        <th className="text-right">Unit Cost</th>
+                                        <th className="text-right">Unit Price</th>
                                         <th className="text-right">Line Total</th>
                                     </tr>
                                 </thead>
@@ -157,8 +161,8 @@ const ViewPurchaseInvoicePage = () => {
                                             </td>
                                             <td className="text-right">{item.quantity}</td>
                                             <td className="text-right font-semibold">{item.receivedQty || 0}</td>
-                                            <td className="text-right">Rs {item.unitCost?.toFixed(2) || '0.00'}</td>
-                                            <td className="text-right font-bold">Rs {((item.quantity || 0) * (item.unitCost || 0)).toFixed(2)}</td>
+                                            <td className="text-right">Rs {item.unitPrice?.toFixed(2) || '0.00'}</td>
+                                            <td className="text-right font-bold">Rs {((item.quantity || 0) * (item.unitPrice || 0)).toFixed(2)}</td>
                                         </tr>
                                     ))}
                                 </tbody>

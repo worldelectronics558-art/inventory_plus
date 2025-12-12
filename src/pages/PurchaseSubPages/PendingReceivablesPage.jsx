@@ -1,177 +1,137 @@
 
-// src/pages/PurchaseSubPages/PendingReceivablesPage.jsx
 import React, { useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { AgGridReact } from 'ag-grid-react';
 import { usePendingReceivables } from '../../contexts/PendingReceivablesContext';
 import { useProducts } from '../../contexts/ProductContext';
-import { useLocations } from '../../contexts/LocationContext';
-import useMediaQuery from '../../hooks/useMediaQuery';
 import { getProductDisplayName } from '../../utils/productUtils';
-import { ArrowLeft, Edit, Trash2, Box, User, Calendar, Hash } from 'lucide-react';
+import { ArrowLeft, Trash2, Box, User, Calendar, Hash, Plus, X, PackageCheck } from 'lucide-react';
 import LoadingSpinner from '../../components/LoadingOverlay';
 
-// --- MOBILE CARD VIEW (with corrected data) ---
-const ReceivableBatchCard = ({ batchId, batch, onEdit, onDelete }) => (
-    <div className="card shadow-md border border-gray-200/80 mb-4">
-        <header className="card-header bg-gray-100 p-3 border-b">
-            <div className="flex justify-between items-center">
-                <h2 className="font-bold text-md text-indigo-700 flex items-center"><Hash size={16} className="mr-2" /> {batchId}</h2>
-                <button onClick={() => onDelete(batchId)} className="p-1 text-red-500 hover:text-red-700" title="Delete Batch"><Trash2 size={20} /></button>
-            </div>
-            <div className="text-xs text-gray-500 flex items-center space-x-3 mt-1">
-                <span className="flex items-center"><User size={12} className="mr-1" /> {batch.receivedBy}</span>
-                <span className="flex items-center"><Calendar size={12} className="mr-1" /> {batch.receivedAt}</span>
-            </div>
-        </header>
-        <div className="p-2">
-            <table className="table w-full text-sm">
-                <tbody>
-                    {batch.items.map(item => (
-                        <tr key={item.id} className="border-b last:border-b-0">
-                            <td className="p-2">
-                                <div className="font-semibold">{item.productName}</div>
-                                <div className="text-xs text-gray-500">SKU: {item.sku}</div>
-                                {item.isSerialized && item.serials.length > 0 && (
-                                    <div className="text-xs text-gray-500 mt-1">Serials: {item.serials.join(', ')}</div>
-                                )}
-                            </td>
-                            <td className="p-2 text-right">
-                                <div className="font-bold">{item.quantity}</div>
-                                <div className="text-xs">Qty</div>
-                            </td>
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
+const ReceivableBatchCard = ({ batch, onDeleteBatch, onDeleteItem }) => {
+    const { batchId, items, receivedBy, receivedAt } = batch;
+
+    return (
+        <div className="card overflow-hidden shadow-lg border-transparent hover:shadow-xl transition-shadow duration-300">
+            <header className="flex justify-between items-center p-4 bg-slate-50 border-b border-slate-200">
+                <div className="flex items-center gap-3">
+                    <div className="flex-shrink-0 bg-indigo-100 text-indigo-600 rounded-lg p-2">
+                        <Hash size={20} />
+                    </div>
+                    <div>
+                        <h2 className="font-bold text-lg text-indigo-800">{batchId}</h2>
+                        <div className="text-xs text-slate-500 flex items-center gap-4 mt-1">
+                            <span className="flex items-center gap-1.5"><User size={12} /> {receivedBy}</span>
+                            <span className="flex items-center gap-1.5"><Calendar size={12} /> {receivedAt}</span>
+                        </div>
+                    </div>
+                </div>
+                <div className="card-actions">
+                    <button onClick={() => onDeleteBatch(batchId)} className="btn btn-sm btn-outline-danger" title="Delete Entire Batch">
+                        <Trash2 size={16} />
+                        <span className="hidden sm:inline ml-2">Delete Batch</span>
+                    </button>
+                </div>
+            </header>
+
+            <ul className="p-4 space-y-3 bg-white">
+                {items.map(item => (
+                    <li key={item.id} className="bg-slate-50/70 p-3 rounded-lg border border-slate-200/80 flex items-start justify-between gap-4">
+                        <div>
+                            <p className="font-semibold text-slate-800">{item.productName}</p>
+                            <p className="text-sm text-slate-500">SKU: {item.sku}</p>
+                            <p className="font-bold text-slate-800 mt-2">Quantity: {item.quantity}</p>
+                            {item.isSerialized && item.serials?.length > 0 && (
+                                <div className="mt-2">
+                                    <p className="text-xs font-medium text-slate-600">Serials:</p>
+                                    <p className="text-xs text-slate-500 mt-1 break-all">{item.serials.join(', ')}</p>
+                                </div>
+                            )}
+                        </div>
+                        <button onClick={() => onDeleteItem(item.id, batchId, items.length)} className="btn btn-icon text-slate-400 hover:text-red-600 hover:bg-red-50" title="Delete Item">
+                            <X size={18} />
+                        </button>
+                    </li>
+                ))}
+            </ul>
         </div>
+    );
+}
+
+const EmptyState = () => (
+    <div className="text-center bg-white py-16 px-6 rounded-lg shadow-md border border-slate-200/80">
+        <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-green-100">
+            <PackageCheck size={40} className="text-green-600" />
+        </div>
+        <h3 className="mt-5 text-2xl font-semibold text-slate-800">No Pending Units</h3>
+        <p className="mt-2 text-base text-slate-500">All received stock has been finalized. Great job!</p>
     </div>
 );
 
 const PendingReceivablesPage = () => {
-    const { pendingReceivables, isLoading: receivablesLoading, deleteReceivableBatch, updateReceivableItem } = usePendingReceivables();
+    const { pendingReceivables, isLoading: receivablesLoading, deleteReceivableBatch, removeReceivables } = usePendingReceivables();
     const { products, isLoading: productsLoading } = useProducts();
-    const { locations, isLoading: locationsLoading } = useLocations();
-    const isMobile = useMediaQuery('(max-width: 768px)');
+    
+    const isLoading = receivablesLoading || productsLoading;
 
-    const isLoading = receivablesLoading || productsLoading || locationsLoading;
+    const productMap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
 
-    const productMap = useMemo(() => products.reduce((acc, p) => ({ ...acc, [p.id]: p }), {}), [products]);
-    const locationMap = useMemo(() => locations.reduce((acc, loc) => ({ ...acc, [loc.id]: loc.name }), {}), [locations]);
-
-    // --- FIX: FLATTENED & ENRICHED ROW DATA FOR AG-GRID ---
-    const flatRowData = useMemo(() => {
-        if (isLoading) return [];
-        return pendingReceivables.flatMap(item => {
-            const product = productMap[item.productId];
-            const productName = product ? getProductDisplayName(product) : 'Unknown Product';
-            const locationName = locationMap[item.locationId] || item.locationId;
-            const commonData = {
-                originalId: item.id,
-                batchId: item.batchId,
-                productId: item.productId,
-                productName,
-                sku: item.sku,
-                locationName,
-                isSerialized: item.isSerialized,
-                cost: item.cost,
-                receivedBy: item.createdBy?.name || 'N/A',
-                receivedAt: item.createdAt?.toDate ? item.createdAt.toDate().toLocaleString() : 'N/A',
-            };
-
-            if (item.isSerialized && item.serials && item.serials.length > 0) {
-                return item.serials.map(serial => ({
-                    ...commonData,
-                    id: `${item.id}-${serial}`, // Unique ID for AgGrid row
-                    serialNumber: serial,
-                    quantity: 1,
-                }));
-            } else {
-                return [{
-                    ...commonData,
-                    id: item.id,
-                    serialNumber: 'N/A',
-                    quantity: item.quantity,
-                }];
-            }
-        });
-    }, [pendingReceivables, productMap, locationMap, isLoading]);
-
-
-    // --- FIX: ENRICHED DATA FOR MOBILE VIEW ---
-     const groupedAndSortedBatches = useMemo(() => {
-        if (isLoading || !pendingReceivables.length) return {};
+    const groupedAndSortedBatches = useMemo(() => {
+        if (isLoading || !pendingReceivables.length) return [];
         const grouped = pendingReceivables.reduce((acc, item) => {
-            const batchId = item.batchId || `unknown-batch-${item.id}`;
+            const batchId = item.batchId;
             if (!acc[batchId]) {
                 acc[batchId] = {
+                    batchId,
                     items: [],
                     receivedBy: item.createdBy?.name || 'N/A',
                     receivedAt: item.createdAt?.toDate ? item.createdAt.toDate().toLocaleDateString() : 'N/A',
                 };
             }
-            const product = productMap[item.productId];
+            const product = productMap.get(item.productId);
             acc[batchId].items.push({
                 ...item,
-                productName: product ? getProductDisplayName(product) : 'Unknown Product',
+                productName: product ? getProductDisplayName(product) : (item.productName || `SKU: ${item.sku}`),
             });
             return acc;
         }, {});
-        
-        return Object.keys(grouped).sort().reverse().reduce((obj, key) => { 
-            obj[key] = grouped[key]; 
-            return obj; 
-        }, {});
+
+        return Object.values(grouped).sort((a, b) => b.batchId.localeCompare(a.batchId));
 
     }, [pendingReceivables, isLoading, productMap]);
 
-    const handleDelete = useCallback(async (batchId) => {
+    const handleDeleteBatch = useCallback(async (batchId) => {
         if (window.confirm(`Are you sure you want to delete the entire batch "${batchId}"? This cannot be undone.`)) {
             try {
                 await deleteReceivableBatch(batchId);
             } catch (error) {
+                console.error("Failed to delete batch:", error);
                 alert(`Failed to delete batch: ${error.message}`);
             }
         }
     }, [deleteReceivableBatch]);
 
-    const [columnDefs] = React.useState([
-        { headerName: 'Batch ID', field: 'batchId', filter: 'agTextColumnFilter', sort: 'desc', width: 180, pinned: 'left', checkboxSelection: true, headerCheckboxSelection: true },
-        { headerName: 'Product', field: 'productName', filter: 'agTextColumnFilter', flex: 2, minWidth: 250 },
-        { headerName: 'SKU', field: 'sku', filter: 'agTextColumnFilter', width: 150 },
-        { headerName: 'Serial Number', field: 'serialNumber', width: 180 },
-        { headerName: 'Qty', field: 'quantity', width: 80 },
-        { headerName: 'Location', field: 'locationName', width: 150 },
-        { headerName: 'Received By', field: 'receivedBy', width: 150 },
-        { headerName: 'Received At', field: 'receivedAt', width: 180, sort: 'desc' },
-        { 
-            headerName: 'Actions', 
-            width: 100, 
-            cellRenderer: (params) => (
-                 <div className="flex items-center justify-center h-full">
-                    <button onClick={() => handleDelete(params.data.batchId)} className="p-1 text-red-600 hover:text-red-800" title="Delete Entire Batch">
-                        <Trash2 size={18} />
-                    </button>
-                </div>
-            ),
-            pinned: 'right',
-            sortable: false,
-            filter: false,
-        }
-    ]);
+    const handleDeleteItem = useCallback(async (itemId, batchId, batchSize) => {
+        const isLastItem = batchSize === 1;
+        const message = isLastItem 
+            ? `This is the last item in the batch. Deleting it will remove the entire batch "${batchId}". Are you sure?`
+            : `Are you sure you want to delete this item?`;
 
-    const defaultColDef = useMemo(() => ({
-        sortable: true,
-        resizable: true,
-        suppressHeaderMenuButton: true,
-    }), []);
+        if (window.confirm(message)) {
+            try {
+                await removeReceivables([itemId]);
+            } catch (error) {
+                console.error("Failed to delete item:", error);
+                alert(`Failed to delete item: ${error.message}`);
+            }
+        }
+    }, [removeReceivables]);
 
     if (isLoading) {
         return <LoadingSpinner>Loading pending items...</LoadingSpinner>;
     }
 
     return (
-        <div className="page-container bg-gray-50">
+        <div className="page-container">
             <header className="page-header">
                 <div>
                     <Link to="/purchase" className="flex items-center text-sm font-medium text-gray-500 hover:text-gray-700 mb-1">
@@ -179,37 +139,29 @@ const PendingReceivablesPage = () => {
                     </Link>
                     <h1 className="page-title">Pending Stock Receivables</h1>
                 </div>
+                <div className="page-actions">
+                    <Link to="/purchase/receive" className="btn btn-primary">
+                        <Plus size={20}/>
+                        Receive New Stock
+                    </Link>
+                </div>
             </header>
-            <div className="page-content">
-                {flatRowData.length === 0 ? (
-                    <div className="text-center text-gray-500 py-12">
-                        <Box size={48} className="mx-auto text-gray-400" />
-                        <h3 className="mt-4 text-lg font-semibold">No Pending Items</h3>
-                        <p>All received stock has been finalized.</p>
-                    </div>
-                ) : isMobile ? (
-                    <div>
-                        {Object.entries(groupedAndSortedBatches).map(([batchId, batch]) => (
-                            <ReceivableBatchCard key={batchId} batchId={batchId} batch={batch} onDelete={handleDelete} />
+            <main className="page-content">
+                {groupedAndSortedBatches.length === 0 ? (
+                    <EmptyState />
+                ) : (
+                    <div className="max-w-5xl mx-auto space-y-6">
+                        {groupedAndSortedBatches.map((batch) => (
+                            <ReceivableBatchCard 
+                                key={batch.batchId} 
+                                batch={batch} 
+                                onDeleteBatch={handleDeleteBatch} 
+                                onDeleteItem={handleDeleteItem} 
+                            />
                         ))}
                     </div>
-                ) : (
-                    <div className="card shadow-sm">
-                        <div className="ag-theme-indigo" style={{ height: '70vh', width: '100%' }}>
-                            <AgGridReact
-                                rowData={flatRowData}
-                                columnDefs={columnDefs}
-                                defaultColDef={defaultColDef}
-                                pagination={true}
-                                paginationPageSize={100}
-                                animateRows={true}
-                                rowSelection="multiple"
-                                getRowId={params => params.data.id}
-                            />
-                        </div>
-                    </div>
                 )}
-            </div>
+            </main>
         </div>
     );
 };

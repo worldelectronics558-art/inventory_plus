@@ -1,6 +1,4 @@
 
-// src/pages/SalesSubPages/StockDeliveryPage.jsx
-
 import React, { useState, useMemo, useCallback } from 'react';
 import Select from 'react-select';
 import { useNavigate, Link } from 'react-router-dom';
@@ -19,8 +17,8 @@ const customSelectStyles = {
     control: (p, s) => ({ ...p, width: '100%', backgroundColor: '#fff', border: s.isFocused ? '2px solid #059669' : '1px solid #D1D5DB', borderRadius: '0.5rem', padding: '0.1rem 0', boxShadow: 'none', '&:hover': { borderColor: s.isFocused ? '#059669' : '#9CA3AF' } }),
     menu: (p) => ({ ...p, zIndex: 20, backgroundColor: '#fff', border: '1px solid #D1D5DB' }),
     option: (p, s) => ({ ...p, backgroundColor: s.isSelected ? '#059669' : s.isFocused ? '#D1FAE5' : 'transparent', color: s.isSelected ? 'white' : '#111827' }),
-    input: (p) => ({ ...p, color: '#111827' }),
-    singleValue: (p) => ({ ...p, color: '#111827' }),
+    input: (p) => ({...p, color: '#111827'}),
+    singleValue: (p) => ({...p, color: '#111827'}),
     menuPortal: (b) => ({ ...b, zIndex: 9999 })
 };
 
@@ -43,6 +41,23 @@ const StockDeliveryPage = () => {
 
     const productsMap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
     const productOptions = useMemo(() => products.map(p => ({ value: p.id, label: getProductDisplayName(p), product: p })), [products]);
+    
+    const inventoryByLocationAndSku = useMemo(() => {
+        const map = new Map();
+        inventoryItems.forEach(item => {
+            const key = `${item.locationId}_${item.sku}`;
+            if (!map.has(key)) {
+                map.set(key, { serialized: [], nonSerializedQuantity: 0 });
+            }
+            const entry = map.get(key);
+            if (item.isSerialized) {
+                entry.serialized.push(item);
+            } else {
+                entry.nonSerializedQuantity += (item.quantity || 0);
+            }
+        });
+        return map;
+    }, [inventoryItems]);
 
     const handleAddProduct = () => {
         if (!selectedProduct) return;
@@ -50,22 +65,24 @@ const StockDeliveryPage = () => {
         const newItem = {
             id: `item_${Date.now()}`,
             productId: product.id,
+            quantity: 1,
             units: product.isSerialized ? [{ id: `unit_${Date.now()}`, serial: '', inventoryItem: null, error: null, isValid: false }] : []
         };
         setBatchItems(prev => [newItem, ...prev]);
         setSelectedProduct(null);
     };
 
+    const handleItemUpdate = (itemId, newValues) => {
+        setBatchItems(prev => prev.map(item => item.id === itemId ? { ...item, ...newValues } : item));
+    };
+
     const handleUpdateItemUnit = (itemIndex, unitIndex, newValues) => {
         setBatchItems(prevBatch => 
             prevBatch.map((item, idx) => {
                 if (idx === itemIndex) {
-                    const newUnits = item.units.map((unit, uIdx) => {
-                        if (uIdx === unitIndex) {
-                            return { ...unit, ...newValues };
-                        }
-                        return unit;
-                    });
+                    const newUnits = item.units.map((unit, uIdx) => 
+                        uIdx === unitIndex ? { ...unit, ...newValues } : unit
+                    );
                     return { ...item, units: newUnits };
                 }
                 return item;
@@ -82,28 +99,28 @@ const StockDeliveryPage = () => {
         const product = productsMap.get(item.productId);
         if (!product) return; 
 
-        const existingInvItem = inventoryItems.find(inv => inv.serial === serial && inv.sku === product.sku);
+        const existingInvItem = inventoryItems.find(inv => inv.serial === serial && inv.sku === product.sku && inv.locationId === locationId);
         const isAlreadySelected = batchItems.some((bi, bi_idx) => bi.units.some((u, u_idx) => u.inventoryItem?.id === existingInvItem?.id && (bi_idx !== itemIndex || u_idx !== unitIndex)));
 
         if (existingInvItem && !isAlreadySelected) {
             handleUpdateItemUnit(itemIndex, unitIndex, { serial, inventoryItem: existingInvItem, isValid: true, error: null });
         } else if (isAlreadySelected) {
-            handleUpdateItemUnit(itemIndex, unitIndex, { serial, inventoryItem: null, isValid: false, error: 'Already selected.' });
+            handleUpdateItemUnit(itemIndex, unitIndex, { serial, inventoryItem: null, isValid: false, error: 'Already in this batch.' });
         } else {
-            handleUpdateItemUnit(itemIndex, unitIndex, { serial, inventoryItem: null, isValid: false, error: 'Not in stock.' });
+            handleUpdateItemUnit(itemIndex, unitIndex, { serial, inventoryItem: null, isValid: false, error: 'Not in stock at this location.' });
         }
-    }, [batchItems, inventoryItems, productsMap]);
+    }, [batchItems, inventoryItems, productsMap, locationId]);
 
     const handleRemoveUnit = (itemIndex, unitIndex) => {
         setBatchItems(prev => {
             const newBatch = prev.map((item, idx) => {
                 if (idx === itemIndex) {
                     const newUnits = item.units.filter((_, uIdx) => uIdx !== unitIndex);
-                    return { ...item, units: newUnits };
+                    return newUnits.length > 0 ? { ...item, units: newUnits } : null;
                 }
                 return item;
             });
-            return newBatch.filter(item => item.units.length > 0);
+            return newBatch.filter(Boolean);
         });
     };
 
@@ -114,28 +131,28 @@ const StockDeliveryPage = () => {
     const handleAddUnit = (itemIndex) => {
         setBatchItems(prev => prev.map((item, idx) => {
             if (idx === itemIndex) {
-                const newUnits = [...item.units, { id: `unit_${Date.now()}`, serial: '', inventoryItem: null, error: null, isValid: false }];
-                return { ...item, units: newUnits };
+                return { ...item, units: [...item.units, { id: `unit_${Date.now()}`, serial: '', inventoryItem: null, error: null, isValid: false }] };
             }
             return item;
         }));
     };
 
     const handleStockSelected = (inventoryItem, itemIndex) => {
-        const newUnit = {
-            id: `unit_${Date.now()}`,
-            serial: inventoryItem.serial,
-            inventoryItem: inventoryItem,
-            isValid: true,
-            error: null
-        };
-        setBatchItems(prevBatch =>
-            prevBatch.map((item, idx) => 
-                idx === itemIndex ? { ...item, units: [newUnit] } : item
-            )
-        );
+        const item = batchItems[itemIndex];
+        if (item.units.some(u => u.inventoryItem?.id === inventoryItem.id)) return;
+        
+        const newUnit = { id: `unit_${Date.now()}`, serial: inventoryItem.serial, inventoryItem: inventoryItem, isValid: true, error: null };
+        
+        const firstEmptyUnitIndex = item.units.findIndex(u => !u.serial);
+        if (firstEmptyUnitIndex !== -1) {
+            const newUnits = [...item.units];
+            newUnits[firstEmptyUnitIndex] = newUnit;
+            handleItemUpdate(item.id, { units: newUnits });
+        } else {
+            handleItemUpdate(item.id, { units: [...item.units, newUnit] });
+        }
     };
-
+    
     const openScanner = (itemIndex, unitIndex) => {
         setScanContext({ itemIndex, unitIndex });
         setIsScannerOpen(true);
@@ -152,46 +169,66 @@ const StockDeliveryPage = () => {
         if (!user || !userId) { setFormError("User profile not loaded."); return; }
         if (!locationId) { setFormError('Please select a delivery location.'); return; }
         if (batchItems.length === 0) { setFormError('You must add at least one product.'); return; }
-        if (!batchItems.every(item => item.units.every(u => u.isValid))) { setFormError('Please correct all serial number errors before saving.'); return; }
 
-        setAppProcessing(true, 'Queuing delivery...');
+        setAppProcessing(true, 'Validating and queuing delivery...');
 
         try {
             const batchId = `batch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const deliverySummaries = [];
 
-            const itemsToDeliver = batchItems.flatMap(item => 
-                item.units.map(unit => unit.inventoryItem).filter(Boolean)
-            );
-
-            const deliverySummaries = itemsToDeliver.reduce((acc, item) => {
+            for (const item of batchItems) {
                 const product = productsMap.get(item.productId);
-                if (!product) {
-                     console.error(`Product details for ID ${item.productId} not found. Skipping item.`);
-                     return acc;
-                }
+                if (!product) throw new Error(`Product with ID ${item.productId} not found.`);
 
-                if (!acc[product.sku]) {
-                    acc[product.sku] = {
+                const isProductSerialized = product.isSerialized || false; // Ensure boolean value
+                let summary;
+
+                if (isProductSerialized) {
+                    if (item.units.length === 0 || !item.units.every(u => u.isValid && u.inventoryItem)) {
+                        throw new Error(`Product ${product.name} requires valid serial numbers for delivery.`);
+                    }
+                    summary = {
                         batchId,
                         sku: product.sku,
                         productId: product.id,
-                        productName: product.name,
-                        isSerialized: product.isSerialized,
-                        locationId: locationId,
+                        productName: product.name || product.sku,
+                        isSerialized: true,
+                        locationId,
+                        serials: item.units.map(u => u.serial),
+                        quantity: item.units.length
+                    };
+                } else {
+                    const quantityToDeliver = Number(item.quantity);
+                    if (!Number.isInteger(quantityToDeliver) || quantityToDeliver <= 0) {
+                        throw new Error(`A valid quantity is required for ${product.name}.`);
+                    }
+                    
+                    const stockKey = `${locationId}_${product.sku}`;
+                    const availableStock = inventoryByLocationAndSku.get(stockKey)?.nonSerializedQuantity || 0;
+                    if (quantityToDeliver > availableStock) {
+                        throw new Error(`Not enough stock for ${product.name}. Available: ${availableStock}, Required: ${quantityToDeliver}.`);
+                    }
+
+                    summary = {
+                        batchId,
+                        sku: product.sku,
+                        productId: product.id,
+                        productName: product.name || product.sku,
+                        isSerialized: false,
+                        locationId,
+                        quantity: quantityToDeliver,
                         serials: []
                     };
                 }
-                acc[product.sku].serials.push(item.serial);
-                return acc;
-            }, {});
+                deliverySummaries.push(summary);
+            }
+            
+            if (deliverySummaries.length === 0) throw new Error("Could not form a valid delivery.");
 
-            const deliverySummaryList = Object.values(deliverySummaries);
-            if (deliverySummaryList.length === 0) throw new Error("Could not form a valid delivery. Product details might be missing.");
-
-            await addToQueue('CREATE_PENDING_DELIVERABLE', deliverySummaryList, user);
+            await addToQueue('CREATE_PENDING_DELIVERABLE', deliverySummaries, user);
 
             setAppProcessing(false);
-            alert('Delivery batch has been queued!');
+            alert('Delivery batch has been queued successfully!');
             navigate('/sales/pending-deliverables');
 
         } catch (error) {
@@ -217,7 +254,7 @@ const StockDeliveryPage = () => {
                 {formError && <div className="alert alert-error text-sm"><span>{formError}</span></div>}
                 <div className="form-control">
                     <label className="label"><span className="label-text text-lg font-bold">Delivery Location</span></label>
-                    <select value={locationId} onChange={(e) => setLocationId(e.target.value)} className="input-base" disabled={batchItems.length > 0}>
+                    <select value={locationId} onChange={(e) => setLocationId(e.Target.value)} className="input-base" disabled={batchItems.length > 0}>
                         <option value="">-- Select a Location --</option>
                         {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
                     </select>
@@ -239,13 +276,15 @@ const StockDeliveryPage = () => {
                             productsMap={productsMap}
                             locationId={locationId}
                             batchItems={batchItems}
+                            onItemUpdate={handleItemUpdate}
                             onUpdateUnit={handleUpdateItemUnit}
                             onAddUnit={handleAddUnit}
                             onRemoveUnit={handleRemoveUnit}
                             onRemoveItem={handleRemoveItem}
                             onOpenScanner={openScanner}
                             onValidateSerial={validateAndSetSerial}
-                            onStockSelected={onStockSelected}
+                            onStockSelected={handleStockSelected}
+                            inventoryByLocationAndSku={inventoryByLocationAndSku}
                         />
                     ))}
                 </div>
@@ -254,18 +293,27 @@ const StockDeliveryPage = () => {
     );
 };
 
-const ItemCard = ({ item, itemIndex, productsMap, locationId, batchItems, onUpdateUnit, onAddUnit, onRemoveUnit, onRemoveItem, onOpenScanner, onValidateSerial, onStockSelected }) => {
+const ItemCard = ({ item, itemIndex, productsMap, locationId, batchItems, onItemUpdate, onUpdateUnit, onAddUnit, onRemoveUnit, onRemoveItem, onOpenScanner, onValidateSerial, onStockSelected, inventoryByLocationAndSku }) => {
     const [showStockList, setShowStockList] = useState(false);
     const product = productsMap.get(item.productId);
-
+ 
     if (!product) return null;
 
+    const handleQuantityChange = (e) => {
+        const newQuantity = Math.max(0, parseInt(e.target.value, 10) || 0);
+        onItemUpdate(item.id, { quantity: newQuantity });
+    };
+
+    const stockKey = `${locationId}_${product.sku}`;
+    const availableStock = inventoryByLocationAndSku.get(stockKey)?.nonSerializedQuantity || 0;
+    const isQuantityInvalid = !product.isSerialized && item.quantity > availableStock;
+
     return (
-        <div className="card bg-base-100 border shadow-md">
+        <div className={`card bg-base-100 border shadow-md ${isQuantityInvalid ? 'border-error' : ''}`}>
             <div className="card-body p-3">
                 <div className='flex justify-between items-start'>
                     <div>
-                        <h3 className="font-bold text-lg">{product.name}</h3>
+                        <h3 className="font-bold text-lg">{product.name || product.model}</h3>
                         <p className="text-md text-gray-600 font-mono">SKU: {product.sku}</p>
                     </div>
                     <button onClick={() => onRemoveItem(itemIndex)} className="btn btn-sm btn-ghost text-red-500"><X size={20}/></button>
@@ -273,23 +321,28 @@ const ItemCard = ({ item, itemIndex, productsMap, locationId, batchItems, onUpda
                 <div className="space-y-2 mt-2">
                     {product.isSerialized ? (
                         <>
-                            <label className="label-text font-semibold">Serials</label>
+                            <label className="label-text font-semibold">Serials ({item.units.length})</label>
                             {item.units.map((unit, unitIndex) => (
                                 <div key={unit.id} className="flex gap-1.5 items-center">
                                     <input type="text" value={unit.serial} onChange={(e) => onUpdateUnit(itemIndex, unitIndex, { serial: e.target.value, isValid: false, error: null })} onBlur={(e) => onValidateSerial(e.target.value, itemIndex, unitIndex)} placeholder={`Serial #${unitIndex + 1}`} className={`input-base flex-grow ${unit.error ? 'border-red-500' : unit.isValid ? 'border-green-500' : ''}`} />
                                     <button onClick={() => onOpenScanner(itemIndex, unitIndex)} className="btn btn-sm btn-outline"><Camera size={16}/></button>
                                     {unit.isValid ? <CheckCircle size={20} className="text-green-500"/> : (unit.error ? <AlertCircle title={unit.error} size={20} className="text-red-500"/> : null) }
-                                    {item.units.length > 1 && <button onClick={() => onRemoveUnit(itemIndex, unitIndex)} className="btn btn-xs btn-ghost text-gray-500"><X size={16}/></button>}
+                                    {item.units.length > 0 && <button onClick={() => onRemoveUnit(itemIndex, unitIndex)} className="btn btn-sm btn-ghost text-gray-500"><X size={16}/></button>}
                                 </div>
                             ))}
                             <div className='flex gap-2'>
                                 <button onClick={() => onAddUnit(itemIndex)} className="btn btn-outline btn-sm mt-2"><Plus size={16}/> Add Manually</button>
-                                <button onClick={() => setShowStockList(p => !p)} className="btn btn-outline btn-sm mt-2"><List size={16}/> {showStockList ? 'Hide Stock' : 'Select from Stock'}</button>
+                                <button onClick={() => setShowStockList(p => !p)} className="btn btn-outline btn-sm mt-2"><List size={16}/> {showStockList ? 'Hide' : 'Select from'} Stock</button>
                             </div>
                             {showStockList && <AvailableStockPanel itemIndex={itemIndex} product={product} locationId={locationId} batchItems={batchItems} onStockSelected={onStockSelected} /> }
                         </>
                     ) : (
-                        <p className='text-sm text-gray-500'>Non-serialized stock delivery is not yet supported.</p>
+                         <div className="form-control mt-2 w-48">
+                            <label className="label"><span className="label-text">Quantity</span></label>
+                            <input type="number" value={item.quantity} onChange={handleQuantityChange} className="input-base" min="1" />
+                            <label className="label-text-alt mt-1">Available: {availableStock}</label>
+                            {isQuantityInvalid && <label className="label-text-alt text-error mt-1">Cannot deliver more than available.</label>}
+                        </div>
                     )}
                 </div>
             </div>
@@ -301,12 +354,18 @@ const AvailableStockPanel = ({ itemIndex, product, locationId, batchItems, onSto
     const { inventoryItems, isLoading } = useInventory();
     const [searchTerm, setSearchTerm] = useState('');
     
-    const selectedUnitIds = useMemo(() => new Set(batchItems.flatMap(i => i.units.map(u => u.inventoryItem?.id))), [batchItems]);
+    const selectedUnitSerials = useMemo(() => 
+        new Set(batchItems.flatMap(i => i.units.map(u => u.serial)).filter(Boolean)), 
+    [batchItems]);
 
     const availableStock = useMemo(() => {
         if (isLoading || !inventoryItems) return [];
-        return inventoryItems.filter(item => item.sku === product.sku && item.locationId === locationId && !selectedUnitIds.has(item.id));
-    }, [inventoryItems, isLoading, product.sku, locationId, selectedUnitIds]);
+        return inventoryItems.filter(item => 
+            item.sku === product.sku && 
+            item.locationId === locationId && 
+            !selectedUnitSerials.has(item.serial)
+        );
+    }, [inventoryItems, isLoading, product.sku, locationId, selectedUnitSerials]);
 
     const filteredStock = useMemo(() => {
         if (!searchTerm) return availableStock;
@@ -323,12 +382,13 @@ const AvailableStockPanel = ({ itemIndex, product, locationId, batchItems, onSto
                 {filteredStock.length > 0 ? (
                     <ul className='space-y-1'>
                         {filteredStock.map(item => (
-                            <li key={item.id} onClick={() => onStockSelected(item, itemIndex)} className='p-2 bg-white rounded shadow-sm cursor-pointer hover:bg-green-50'>
-                                Serial: <span className='font-semibold'>{item.serial}</span>
+                            <li key={item.id} onClick={() => onStockSelected(item, itemIndex)} className='p-2 bg-white rounded shadow-sm cursor-pointer hover:bg-green-50 flex justify-between'>
+                                <span>Serial: <span className='font-semibold'>{item.serial}</span></span>
+                                <button className='btn btn-xs btn-outline btn-success'><Plus/></button>
                             </li>
                         ))}
                     </ul>
-                ): <p className='text-center text-sm text-gray-500 py-4'>No stock available for this product at the selected location.</p>}
+                ): <p className='text-center text-sm text-gray-500 py-4'>No available serials for this item at {locationId}.</p>}
             </div>
         </div>
     );

@@ -2,6 +2,7 @@
 // src/firebase/inventory_services.js
 
 import { doc, writeBatch, collection, serverTimestamp, setDoc, deleteDoc } from 'firebase/firestore';
+import { generateBatchId, generateDeliveryBatchId } from '../firebase/system_services';
 
 // --- STAGING FUNCTIONS (for creating pending documents) ---
 
@@ -10,12 +11,14 @@ import { doc, writeBatch, collection, serverTimestamp, setDoc, deleteDoc } from 
  * This function is the direct parallel of handleStockDelivery.
  */
 export const handleStockReceipt = async (db, appId, userId, user, summary) => {
-    if (!summary || !summary.sku || !summary.batchId) {
-        throw new Error("A valid receipt summary with at least a SKU and batchId is required.");
+    if (!summary || !summary.sku) {
+        throw new Error("A valid receipt summary with at least a SKU is required.");
     }
+    const permanentBatchId = await generateBatchId(db, appId);
     const pendingReceivableRef = doc(collection(db, `artifacts/${appId}/pending_receivables`));
     await setDoc(pendingReceivableRef, {
         ...summary,
+        batchId: permanentBatchId,
         quantity: summary.isSerialized ? summary.serials.length : (summary.quantity || 0),
         status: 'PENDING',
         createdAt: serverTimestamp(),
@@ -27,12 +30,14 @@ export const handleStockReceipt = async (db, appId, userId, user, summary) => {
  * Creates a 'pending_deliverable' document. This is the first step in the sales process.
  */
 export const handleStockDelivery = async (db, appId, userId, user, summary) => {
-    if (!summary || !summary.sku || !summary.batchId) {
-        throw new Error("A valid delivery summary with at least a SKU and batchId is required.");
+    if (!summary || !summary.sku) {
+        throw new Error("A valid delivery summary with at least a SKU is required.");
     }
+    const permanentBatchId = await generateDeliveryBatchId(db, appId);
     const pendingDeliverableRef = doc(collection(db, `artifacts/${appId}/pending_deliverables`));
     await setDoc(pendingDeliverableRef, {
         ...summary,
+        batchId: permanentBatchId,
         quantity: summary.serials.length,
         status: 'PENDING',
         createdAt: serverTimestamp(),

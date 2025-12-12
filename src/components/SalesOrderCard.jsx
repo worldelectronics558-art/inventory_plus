@@ -1,25 +1,25 @@
 
+// src/components/SalesOrderCard.jsx
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Edit, Trash2, Eye, CheckCircle } from 'lucide-react';
 
 const statusStyles = {
-    Pending: 'bg-yellow-100 text-yellow-700',
-    'Partially Shipped': 'bg-blue-100 text-blue-700',
-    Shipped: 'bg-green-100 text-green-700',
-    Cancelled: 'bg-red-100 text-red-700',
+    PENDING: 'bg-yellow-100 text-yellow-700',
+    'PARTIALLY SHIPPED': 'bg-blue-100 text-blue-700',
+    FINALIZED: 'bg-green-100 text-green-700',
 };
 
-const SalesOrderCard = ({ order, deleteOrder, isMutationDisabled }) => {
+const SalesOrderCard = ({ order, deleteSalesOrder, isMutationDisabled }) => {
     const navigate = useNavigate();
 
     const handleDelete = async (e) => {
-        e.stopPropagation(); // Prevent card click navigation
+        e.stopPropagation();
         if (window.confirm(`Are you sure you want to delete order ${order.orderNumber}?`)) {
             try {
-                await deleteOrder(order.id);
+                await deleteSalesOrder(order.id);
             } catch (error) {
-                console.error("Failed to delete order:", error);
+                console.error("Failed to delete sales order:", error);
                 alert(`Error: ${error.message}`);
             }
         }
@@ -31,16 +31,16 @@ const SalesOrderCard = ({ order, deleteOrder, isMutationDisabled }) => {
     }
 
     const handleCardClick = () => {
-        if (order.status === 'Pending' || order.status === 'Partially Shipped') {
-            navigate(`/sales/finalize/${order.id}`);
+        if (order.status === 'PENDING') {
+            navigate(`/sales/finalize-order/${order.id}`);
         } else {
             navigate(`/sales/view/${order.id}`);
         }
     }
 
-    const canBeDeleted = order.status === 'Pending';
-    const canBeEdited = order.status !== 'Shipped' && order.status !== 'Cancelled';
-    const canBeFinalized = order.status !== 'Shipped' && order.status !== 'Cancelled';
+    const canBeDeleted = order.status === 'PENDING';
+    const canBeEdited = order.status !== 'FINALIZED';
+    const canBeFinalized = order.status !== 'FINALIZED';
 
     return (
         <div 
@@ -50,11 +50,7 @@ const SalesOrderCard = ({ order, deleteOrder, isMutationDisabled }) => {
             <div className="card-body p-4">
                 <div className="flex justify-between items-start">
                     <div>
-                        <p 
-                           className="font-bold text-lg text-blue-600 hover:underline"
-                        >
-                            {order.orderNumber}
-                        </p>
+                        <p className="font-bold text-lg text-blue-600 hover:underline">{order.orderNumber}</p>
                         <p className="text-sm text-gray-600">{order.customerName}</p>
                     </div>
                     <span className={`px-3 py-1 text-xs font-semibold rounded-full ${statusStyles[order.status] || 'bg-gray-100 text-gray-800'}`}>
@@ -77,7 +73,7 @@ const SalesOrderCard = ({ order, deleteOrder, isMutationDisabled }) => {
                         onClick={(e) => handleNavigate(e, `/sales/edit/${order.id}`)}
                         className={`btn btn-sm btn-ghost text-gray-600 ${!canBeEdited || isMutationDisabled ? 'opacity-40 cursor-not-allowed' : ''}`}
                         disabled={!canBeEdited || isMutationDisabled}
-                        title={canBeEdited ? "Edit" : "Cannot edit a shipped or cancelled order"}
+                        title={canBeEdited ? "Edit" : "Cannot edit a finalized order"}
                     >
                         <Edit size={18} />
                     </button>
@@ -85,15 +81,15 @@ const SalesOrderCard = ({ order, deleteOrder, isMutationDisabled }) => {
                         onClick={handleDelete}
                         className={`btn btn-sm btn-ghost text-red-600 ${!canBeDeleted || isMutationDisabled ? 'opacity-40 cursor-not-allowed' : ''}`}
                         disabled={!canBeDeleted || isMutationDisabled}
-                        title={canBeDeleted ? "Delete" : "Can only delete Pending orders"}
+                        title={canBeDeleted ? "Delete" : "Can only delete PENDING orders"}
                     >
                         <Trash2 size={18} />
                     </button>
-                    <button 
-                        onClick={(e) => handleNavigate(e, `/sales/finalize/${order.id}`)}
+                     <button 
+                        onClick={(e) => handleNavigate(e, `/sales/finalize-order/${order.id}`)}
                         className={`btn btn-sm btn-ghost text-green-600 ${!canBeFinalized || isMutationDisabled ? 'opacity-40 cursor-not-allowed' : ''}`}
                         disabled={!canBeFinalized || isMutationDisabled}
-                        title={canBeFinalized ? "Finalize" : "Order is already shipped or cancelled"}
+                        title={canBeFinalized ? "Finalize" : "Order already finalized"}
                     >
                         <CheckCircle size={18} />
                     </button>

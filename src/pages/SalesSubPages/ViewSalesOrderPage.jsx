@@ -1,21 +1,23 @@
+
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
 import { useAuth } from '../../contexts/AuthContext';
 import { ChevronLeft, Edit, AlertTriangle } from 'lucide-react';
+import LoadingOverlay from '../../components/LoadingOverlay';
 
 const statusStyles = {
-    Pending: 'text-yellow-700',
-    'Partially Shipped': 'text-blue-700',
-    Shipped: 'text-green-700',
-    Cancelled: 'text-red-700',
+    PENDING: 'text-red-700',
+    'PARTIALLY SHIPPED': 'text-blue-700',
+    FINALIZED: 'text-green-700',
+    CANCELLED: 'text-red-700',
 };
 
 const statusBgStyles = {
-    Pending: 'bg-yellow-100',
-    'Partially Shipped': 'bg-blue-100',
-    Shipped: 'bg-green-100',
-    Cancelled: 'bg-red-100',
+    PENDING: 'bg-yellow-100',
+    'PARTIALLY SHIPPED': 'bg-blue-100',
+    FINALIZED: 'bg-green-100',
+    CANCELLED: 'bg-red-100',
 };
 
 const ViewSalesOrderPage = () => {
@@ -41,7 +43,7 @@ const ViewSalesOrderPage = () => {
 
             setIsLoading(true);
             try {
-                const orderDocRef = doc(db, 'artifacts', appId, 'salesOrders', id);
+                const orderDocRef = doc(db, 'artifacts', appId, 'sales_orders', id);
                 
                 const docSnap = await getDoc(orderDocRef);
                 
@@ -62,7 +64,7 @@ const ViewSalesOrderPage = () => {
     }, [id, db, appId]);
 
     if (isLoading) {
-        return <div className="page-container flex justify-center items-center"><p>Loading order details...</p></div>;
+        return <LoadingOverlay />;
     }
 
     if (error || !order) {
@@ -79,7 +81,7 @@ const ViewSalesOrderPage = () => {
         );
     }
     
-    const canBeEdited = order.status !== 'Shipped' && order.status !== 'Cancelled';
+    const canBeEdited = order.status !== 'FINALIZED' && order.status !== 'CANCELLED';
 
     return (
         <div className="page-container">
@@ -98,7 +100,7 @@ const ViewSalesOrderPage = () => {
                         onClick={() => navigate(`/sales/edit/${order.id}`)}
                         className="btn btn-secondary"
                         disabled={!canBeEdited}
-                        title={canBeEdited ? "Edit Order" : "Cannot edit a shipped or cancelled order"}
+                        title={canBeEdited ? "Edit Order" : "Cannot edit a finalized or cancelled order"}
                     >
                         <Edit size={18} className="mr-2" />
                         Edit Order

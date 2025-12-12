@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import Select from 'react-select';
 import { useNavigate, Link } from 'react-router-dom';
@@ -5,10 +6,10 @@ import { ArrowLeft, Save, Plus, Trash2 } from 'lucide-react';
 import { useSalesOrders } from '../../contexts/SalesOrderContext.jsx';
 import { useCustomers } from '../../contexts/CustomerContext.jsx';
 import { useProducts } from '../../contexts/ProductContext.jsx';
-import { useLoading } from '../../contexts/LoadingContext.jsx';
 import { useUser } from '../../contexts/UserContext.jsx';
 import { useAuth } from '../../contexts/AuthContext.jsx';
 import { getProductDisplayName } from '../../utils/productUtils.js';
+import LoadingOverlay from '../../components/LoadingOverlay';
 
 const roundToTwo = (num) => Math.round((num + Number.EPSILON) * 100) / 100;
 const GST_RATE = 0.18;
@@ -23,10 +24,9 @@ const customSelectStyles = {
 
 const NewSalesOrderForm = () => {
     const navigate = useNavigate();
-    const { addOrder } = useSalesOrders();
+    const { addSalesOrder, isMutationDisabled } = useSalesOrders();
     const { customers } = useCustomers();
     const { products } = useProducts();
-    const { setAppProcessing, isProcessing } = useLoading();
     const { currentUser } = useUser();
     const { userId } = useAuth();
 
@@ -58,6 +58,7 @@ const NewSalesOrderForm = () => {
 
     const customerOptions = useMemo(() => customers.map(c => ({ value: c.id, label: c.name })), [customers]);
     const productOptions = useMemo(() => products.map(p => ({ value: p.sku, label: getProductDisplayName(p), salePrice: p.salePrice ?? 0 })), [products]);
+    const productsMap = useMemo(() => new Map(products.map(p => [p.sku, p])), [products]);
 
     const handleItemChange = (index, field, value) => {
         const newItems = [...items];
@@ -116,43 +117,44 @@ const NewSalesOrderForm = () => {
             return;
         }
 
-        setAppProcessing(true, 'Creating order...');
-
-        const orderData = {
-            customerId: customerId.value,
-            customerName: customerId.label,
-            orderDate: new Date(orderDate),
-            documentNumber,
-            notes,
-            items: items.map(item => ({
-                productId: item.productId.value,
-                productName: item.productId.label,
-                quantity: Number(item.quantity),
-                unitPrice: roundToTwo(Number(item.unitPrice)), 
-                price: roundToTwo(Number(item.price)),       
-                tax: roundToTwo(Number(item.tax)),           
-            })),
-            totalPreTax: roundToTwo(totals.totalPreTax), 
-            totalTax: roundToTwo(totals.totalTax),
-            totalAmount: roundToTwo(totals.grandTotal),
-        };
-        
-        const userForAction = { ...currentUser, uid: userId };
-
         try {
-            await addOrder(orderData, userForAction);
+            const orderData = {
+                customerId: customerId.value,
+                customerName: customerId.label,
+                orderDate: new Date(orderDate),
+                documentNumber,
+                notes,
+                items: items.map(item => {
+                    const product = productsMap.get(item.productId.value);
+                    if (!product) throw new Error(`Details for product with SKU ${item.productId.value} could not be found.`);
+                    return {
+                        productId: item.productId.value,
+                        productName: product.name,
+                        quantity: Number(item.quantity),
+                        unitPrice: roundToTwo(Number(item.unitPrice)), 
+                        price: roundToTwo(Number(item.price)),       
+                        tax: roundToTwo(Number(item.tax)),
+                    };
+                }),
+                totalPreTax: roundToTwo(totals.totalPreTax), 
+                totalTax: roundToTwo(totals.totalTax),
+                totalAmount: roundToTwo(totals.grandTotal),
+            };
+            
+            const userForAction = { ...currentUser, uid: userId };
+
+            await addSalesOrder(orderData, userForAction);
             sessionStorage.removeItem(SESSION_STORAGE_KEY);
             navigate('/sales');
         } catch (error) {
             console.error("Failed to create order:", error);
             alert(`Error: ${error.message}`);
-        } finally {
-            setAppProcessing(false);
         }
     };
 
     return (
         <div className="page-container">
+            {isMutationDisabled && <LoadingOverlay />}
             <header className="page-header">
                  <div>
                     <Link to="/sales" className="flex items-center text-sm font-medium text-gray-500 hover:text-gray-700 mb-2">
@@ -257,13 +259,13 @@ const NewSalesOrderForm = () => {
 
                     <div className="mt-8 pt-5 border-t border-gray-200 flex justify-end gap-3">
                         <Link to="/sales" className="btn btn-white">Cancel</Link>
-                        <button type="submit" className="btn btn-primary" disabled={isProcessing || !userId}>
-                            {isProcessing ? (
+                        <button type="submit" className="btn btn-primary" disabled={isMutationDisabled || !userId}>
+                            {isMutationDisabled ? (
                                 <span className="loading loading-spinner loading-xs"></span>
                             ) : (
                                 <Save size={16} className="mr-2" />
                             )}
-                            {isProcessing ? 'Saving...' : 'Save Order'}
+                            {isMutationDisabled ? 'Saving...' : 'Save Order'}
                         </button>
                     </div>
                 </form>

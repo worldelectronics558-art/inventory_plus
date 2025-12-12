@@ -1,3 +1,4 @@
+
 // src/contexts/PurchaseInvoiceContext.jsx
 
 import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
@@ -9,12 +10,8 @@ import {
     doc,
     updateDoc,
     deleteDoc,
-    writeBatch,
     serverTimestamp,
     runTransaction,
-    query,
-    where,
-    getDocs,
 } from 'firebase/firestore';
 
 const PurchaseInvoiceContext = createContext();
@@ -64,6 +61,7 @@ export const PurchaseInvoiceProvider = ({ children }) => {
     const { db, appId } = useAuth();
     const [invoices, setInvoices] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [isMutationDisabled, setIsMutationDisabled] = useState(false);
 
     useEffect(() => {
         if (!db || !appId) {
@@ -83,81 +81,95 @@ export const PurchaseInvoiceProvider = ({ children }) => {
     }, [db, appId]);
 
     const addInvoice = useCallback(async (invoiceData, user) => {
-        if (!db || !appId) throw new Error("Database not configured");
-        if (!invoiceData.invoiceDate) throw new Error("Invoice date is required");
-        if (!user?.uid) throw new Error("User data is not available. Please wait and try again.");
-        
-        const invoicesCollectionRef = collection(db, 'artifacts', appId, 'purchaseInvoices');
-        const newInvoiceNumber = await generateInvoiceNumber(db, appId, invoiceData.invoiceDate);
-        
-        const newInvoice = {
-            ...invoiceData,
-            invoiceNumber: newInvoiceNumber,
-            status: 'Pending',
-            createdAt: serverTimestamp(),
-            createdBy: { 
-                uid: user.uid,
-                name: user.displayName || 'N/A'
-            },
-        };
-        return await addDoc(invoicesCollectionRef, newInvoice);
-    }, [db, appId]);
+        setIsMutationDisabled(true);
+        try {
+            // --- Guard Clauses ---
+            if (!db || !appId) throw new Error("Database not configured.");
+            if (!invoiceData) throw new Error("invoiceData is missing.");
+            if (!invoiceData.invoiceDate) throw new Error("Invoice date is required.");
+            if (!user?.uid) throw new Error("User data is not available.");
 
-    const updateInvoice = useCallback(async (id, updatedData) => {
-        if (!db || !appId) throw new Error("Database not configured");
-        const invoiceDocRef = doc(db, 'artifacts', appId, 'purchaseInvoices', id);
-        return await updateDoc(invoiceDocRef, { ...updatedData, updatedAt: serverTimestamp() });
-    }, [db, appId]);
+            const invoicesCollectionRef = collection(db, 'artifacts', appId, 'purchaseInvoices');
+            const newInvoiceNumber = await generateInvoiceNumber(db, appId, invoiceData.invoiceDate);
+            
+            const parseAndValidateNumber = (value, defaultValue = 0) => {
+                const parsed = Number(value);
+                return isNaN(parsed) ? defaultValue : parsed;
+            };
 
-    const deleteInvoiceByNumber = useCallback(async (invoiceNumber) => {
-        if (!db || !appId) throw new Error("Database not configured");
-        const invoicesCollectionRef = collection(db, 'artifacts', appId, 'purchaseInvoices');
-        const q = query(invoicesCollectionRef, where("invoiceNumber", "==", invoiceNumber));
-        const querySnapshot = await getDocs(q);
-        if (querySnapshot.empty) {
-            console.log(`Invoice with number ${invoiceNumber} not found.`);
-            return;
-        }
-        const deletePromises = querySnapshot.docs.map(d => deleteDoc(d.ref));
-        await Promise.all(deletePromises);
-        console.log(`Successfully deleted invoice(s) with number ${invoiceNumber}`);
-    }, [db, appId]);
+            // --- Sanitize Items ---
+            const sanitizedItems = Array.isArray(invoiceData.items)
+                ? invoiceData.items.map(item => ({
+                    productId: item.productId || null,
+                    productName: item.productName || 'N/A',
+                    quantity: parseAndValidateNumber(item.quantity, 1),
+                    unitPrice: parseAndValidateNumber(item.unitPrice),
+                    price: parseAndValidateNumber(item.price),
+                    tax: parseAndValidateNumber(item.tax),
+                }))
+                : [];
 
-    const addStockItems = useCallback(async (itemsToAddToStock, invoiceId, updatedInvoiceData, user) => {
-        if (!db || !appId) throw new Error("Database not configured");
-        if (!user || !user.uid) throw new Error("User not authenticated or UID is missing");
-
-        const batch = writeBatch(db);
-
-        const invoiceDocRef = doc(db, 'artifacts', appId, 'purchaseInvoices', invoiceId);
-        batch.update(invoiceDocRef, { ...updatedInvoiceData, updatedAt: serverTimestamp() });
-
-        const inventoryCollectionRef = collection(db, 'artifacts', appId, 'inventory_items');
-        itemsToAddToStock.forEach(item => {
-            const newItemRef = doc(inventoryCollectionRef);
-            const { id, createdBy, status, ...restOfItem } = item;
-            batch.set(newItemRef, {
-                ...restOfItem,
-                cost: item.cost,
-                receivedBy: createdBy,
-                authorizedBy: { 
+            // --- Build a clean, explicit newInvoice object ---
+            const newInvoice = {
+                supplierId: invoiceData.supplierId || null,
+                supplierName: invoiceData.supplierName || 'N/A',
+                invoiceDate: invoiceData.invoiceDate,
+                documentNumber: invoiceData.documentNumber || '',
+                notes: invoiceData.notes || '',
+                items: sanitizedItems,
+                totalPreTax: parseAndValidateNumber(invoiceData.totalPreTax),
+                totalTax: parseAndValidateNumber(invoiceData.totalTax),
+                totalAmount: parseAndValidateNumber(invoiceData.totalAmount),
+                invoiceNumber: newInvoiceNumber,
+                status: 'PENDING',
+                createdAt: serverTimestamp(),
+                createdBy: { 
                     uid: user.uid,
                     name: user.displayName || 'N/A'
                 },
-                addedAt: serverTimestamp(),
-            });
-        });
+            };
+            
+            await addDoc(invoicesCollectionRef, newInvoice);
+        } catch (error) {
+            console.error("Failed to create purchase invoice:", error, "Invoice Data:", invoiceData);
+            throw error; // Re-throw to be handled by the form
+        } finally {
+            setIsMutationDisabled(false);
+        }
+    }, [db, appId]);
 
-        await batch.commit();
+    const updateInvoice = useCallback(async (id, updatedData) => {
+        setIsMutationDisabled(true);
+        if (!db || !appId) throw new Error("Database not configured");
+        const invoiceDocRef = doc(db, 'artifacts', appId, 'purchaseInvoices', id);
+        try {
+            return await updateDoc(invoiceDocRef, { ...updatedData, updatedAt: serverTimestamp() });
+        } finally {
+            setIsMutationDisabled(false);
+        }
+    }, [db, appId]);
+
+    const deleteInvoice = useCallback(async (invoiceId) => {
+        setIsMutationDisabled(true);
+        if (!db || !appId) throw new Error("Database not configured");
+        const invoiceDocRef = doc(db, 'artifacts', appId, 'purchaseInvoices', invoiceId);
+        try {
+            await deleteDoc(invoiceDocRef);
+        } catch (error) {
+            console.error("Error deleting invoice:", error);
+            throw error; // Re-throw to be caught in the component
+        } finally {
+            setIsMutationDisabled(false);
+        } 
     }, [db, appId]);
 
     const value = {
         invoices,
         addInvoice,
         updateInvoice,
-        deleteInvoice: deleteInvoiceByNumber,
-        addStockItems,
+        deleteInvoice,
         isLoading,
+        isMutationDisabled
     };
 
     return (

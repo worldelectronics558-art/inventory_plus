@@ -61,6 +61,7 @@ const NewPurchaseInvoiceForm = () => {
 
     const supplierOptions = useMemo(() => suppliers.map(s => ({ value: s.id, label: s.name })), [suppliers]);
     const productOptions = useMemo(() => products.map(p => ({ value: p.sku, label: getProductDisplayName(p), purchasePrice: p.purchasePrice ?? 0 })), [products]);
+    const productsMap = useMemo(() => new Map(products.map(p => [p.sku, p])), [products]);
 
     const handleItemChange = (index, field, value) => {
         const newItems = [...items];
@@ -127,14 +128,18 @@ const NewPurchaseInvoiceForm = () => {
             invoiceDate: new Date(invoiceDate),
             documentNumber,
             notes,
-            items: items.map(item => ({
-                productId: item.productId.value,
-                productName: item.productId.label,
-                quantity: Number(item.quantity),
-                unitCost: roundToTwo(Number(item.unitCost)), 
-                price: roundToTwo(Number(item.price)),       
-                tax: roundToTwo(Number(item.tax)),           
-            })),
+            items: items.map(item => {
+                const product = productsMap.get(item.productId.value);
+                if (!product) throw new Error(`Details for product with SKU ${item.productId.value} could not be found.`);
+                return {
+                    productId: item.productId.value,
+                    productName: product.name,
+                    quantity: Number(item.quantity),
+                    unitCost: roundToTwo(Number(item.unitCost)), 
+                    price: roundToTwo(Number(item.price)),       
+                    tax: roundToTwo(Number(item.tax)), 
+                };              
+            }),
             totalPreTax: roundToTwo(totals.totalPreTax), 
             totalTax: roundToTwo(totals.totalTax),
             totalAmount: roundToTwo(totals.grandTotal),
