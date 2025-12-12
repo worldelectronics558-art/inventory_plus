@@ -36,6 +36,7 @@ const StockReceivePage = () => {
     });
 
     const { locationId, batchItems } = formState;
+    const productsMap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
 
     useEffect(() => {
         sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(formState));
@@ -59,7 +60,7 @@ const StockReceivePage = () => {
             setFormError('This product is already in the batch.');
             return;
         }
-        const newItem = { id: `item_${Date.now()}`, productId: product.id, productName: product.name, sku: product.sku, cost: product.cost || 0, isSerialized: product.isSerialized, quantity: 1, serials: product.isSerialized ? [''] : [] };
+        const newItem = { id: `item_${Date.now()}`, productId: product.id, quantity: 1, serials: product.isSerialized ? [''] : [] };
         updateForm('batchItems', [newItem, ...batchItems]);
         setSelectedProduct(null);
         setFormError('');
@@ -87,23 +88,36 @@ const StockReceivePage = () => {
 
     const handleSaveBatch = async () => {
         setFormError('');
-        if (!user) {
-             setFormError("Cannot save batch: User profile is not loaded or does not exist.");
-             return;
-        }
+        if (!user) { setFormError("Cannot save batch: User profile is not loaded."); return; }
         if (!locationId) { setFormError('You must select a receiving location.'); return; }
         if (batchItems.length === 0) { setFormError('You must add at least one product.'); return; }
 
         try {
+            const batchId = `batch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            
             const itemsToQueue = batchItems.map(item => {
-                const finalSerials = item.isSerialized ? item.serials.map(s => s.trim()).filter(Boolean) : [];
-                if (item.isSerialized && finalSerials.length === 0) {
-                    throw new Error(`Product ${item.productName} requires at least one serial number.`);
+                const product = productsMap.get(item.productId);
+                if (!product) throw new Error(`Product details for ID ${item.productId} could not be found.`);
+
+                const finalSerials = product.isSerialized ? item.serials.map(s => s.trim()).filter(Boolean) : [];
+                if (product.isSerialized && finalSerials.length === 0) {
+                    throw new Error(`Product ${product.name} requires at least one serial number.`);
                 }
-                return { productId: item.productId, productName: item.productName, sku: item.sku, isSerialized: item.isSerialized, locationId: locationId, cost: item.cost, quantity: item.isSerialized ? finalSerials.length : item.quantity, serials: finalSerials };
+
+                return {
+                    batchId,
+                    productId: product.id,
+                    productName: product.name, // Guaranteed to be correct
+                    sku: product.sku,           // Guaranteed to be correct
+                    isSerialized: product.isSerialized, // Guaranteed to be correct
+                    locationId: locationId,
+                    cost: product.cost || 0,   // Guaranteed to be correct
+                    quantity: product.isSerialized ? finalSerials.length : item.quantity,
+                    serials: finalSerials
+                };
             });
             
-            await addToQueue('STOCK_IN', itemsToQueue, user);
+            await addToQueue('CREATE_PENDING_RECEIVABLE', itemsToQueue, user);
             
             sessionStorage.removeItem(SESSION_STORAGE_KEY);
             alert('Batch successfully queued. It will appear in "Pending Receivables" shortly.');
@@ -114,19 +128,11 @@ const StockReceivePage = () => {
     };
 
     if (isLoading) {
-        return (
-            <div className="page-container flex justify-center items-center">
-                <p>Loading user profile...</p>
-            </div>
-        );
+        return <div className="page-container flex justify-center items-center"><p>Loading user profile...</p></div>;
     }
     
     if (!user) {
-        return (
-            <div className="page-container flex justify-center items-center">
-                <p className="text-red-500">Error: Could not load user profile. Please try logging out and back in.</p>
-            </div>
-        );
+        return <div className="page-container flex justify-center items-center"><p className="text-red-500">Error: Could not load user profile.</p></div>;
     }
 
     return (
@@ -164,7 +170,7 @@ const StockReceivePage = () => {
 
                 <div className="space-y-3">
                     {batchItems.map((item, index) => (
-                        <ItemCard key={item.id} item={item} onUpdate={handleItemUpdate} onScan={(serialIndex) => openScannerForSerial(index, serialIndex)} />
+                        <ItemCard key={item.id} item={item} productsMap={productsMap} onUpdate={handleItemUpdate} onScan={(serialIndex) => openScannerForSerial(index, serialIndex)} />
                     ))}
                 </div>
 
@@ -178,7 +184,11 @@ const StockReceivePage = () => {
     );
 };
 
-const ItemCard = ({ item, onUpdate, onScan }) => {
+const ItemCard = ({ item, productsMap, onUpdate, onScan }) => {
+    const product = productsMap.get(item.productId);
+
+    if (!product) return null; // Or some fallback UI
+
     const handleQuantityChange = (e) => onUpdate(item.id, { quantity: Math.max(1, parseInt(e.target.value, 10) || 1) });
     const handleSerialChange = (index, value) => {
         const newSerials = [...item.serials];
@@ -191,9 +201,9 @@ const ItemCard = ({ item, onUpdate, onScan }) => {
     return (
         <div className="card bg-base-100 border shadow-md" data-item-id={item.id}>
             <div className="card-body p-3">
-                <h3 className="font-bold text-lg">{item.productName}</h3>
-                <p className="text-md text-gray-600 font-mono">SKU: {item.sku}</p>
-                {item.isSerialized ? (
+                <h3 className="font-bold text-lg">{product.name}</h3>
+                <p className="text-md text-gray-600 font-mono">SKU: {product.sku}</p>
+                {product.isSerialized ? (
                     <div className="space-y-2 mt-2">
                         <label className="label-text font-semibold">Serial Numbers</label>
                         {item.serials.map((serial, index) => (

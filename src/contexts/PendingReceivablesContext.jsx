@@ -1,4 +1,3 @@
-
 // src/contexts/PendingReceivablesContext.jsx
 
 import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
@@ -23,7 +22,6 @@ export const PendingReceivablesProvider = ({ children }) => {
         }
 
         setIsLoading(true);
-        // --- CORRECTED COLLECTION NAME ---
         const receivablesCollectionRef = collection(db, `/artifacts/${appId}/pending_receivables`);
 
         const unsubscribe = onSnapshot(receivablesCollectionRef, (snapshot) => {
@@ -60,7 +58,6 @@ export const PendingReceivablesProvider = ({ children }) => {
         }
     }, [db, appId]);
 
-    // --- 1. NEW FUNCTION TO DELETE AN ENTIRE BATCH ---
     const deleteReceivableBatch = useCallback(async (batchId) => {
         if (!batchId) return;
         if (!db || !appId) throw new Error("Database connection is not available.");

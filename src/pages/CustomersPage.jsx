@@ -4,13 +4,13 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCustomers } from '../contexts/CustomerContext';
-import { useSales } from '../contexts/SalesContext';
+import { useSalesOrders } from '../contexts/SalesOrderContext';
 import { Plus, Search, Edit, Trash2 } from 'lucide-react';
 import { useLoading } from '../contexts/LoadingContext';
 
 const CustomersPage = () => {
     const { customers, deleteCustomer, isLoading } = useCustomers();
-    const { salesOrders } = useSales();
+    const { salesOrders } = useSalesOrders();
     const { setAppProcessing } = useLoading();
     const navigate = useNavigate();
     const [searchTerm, setSearchTerm] = useState('');

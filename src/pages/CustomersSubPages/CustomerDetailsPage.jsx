@@ -4,13 +4,13 @@
 import React from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useCustomers } from '../../contexts/CustomerContext';
-import { useSales } from '../../contexts/SalesContext';
+import { useSalesOrders } from '../../contexts/SalesOrderContext';
 import { ArrowLeft, Edit, Mail, Phone, MapPin, User, Star, ShoppingBag } from 'lucide-react';
 
 const CustomerDetailsPage = () => {
     const { id } = useParams();
     const { customers } = useCustomers();
-    const { salesOrders } = useSales();
+    const { salesOrders } = useSalesOrders();
 
     const customer = customers.find(c => c.id === id);
     const customerOrders = salesOrders.filter(order => order.customerId === id);

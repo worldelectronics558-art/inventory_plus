@@ -14,7 +14,8 @@ import { ProductProvider } from './contexts/ProductContext.jsx';
 import { InventoryProvider } from './contexts/InventoryContext.jsx';
 import { SyncProvider } from './contexts/SyncContext.jsx';
 import { CustomerProvider } from './contexts/CustomerContext.jsx';
-import { SalesProvider } from './contexts/SalesContext.jsx';
+import { PurchaseInvoiceProvider } from './contexts/PurchaseInvoiceContext.jsx';
+import { SalesOrderProvider } from './contexts/SalesOrderContext.jsx';
 import { SupplierProvider } from './contexts/SupplierContext.jsx'; // Import SupplierProvider
 
 // Correct Provider Nesting
@@ -30,9 +31,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(
                   <InventoryProvider>
                     <SupplierProvider> {/* Add SupplierProvider */}
                       <CustomerProvider>
-                        <SalesProvider>
-                          <App />
-                        </SalesProvider>
+                        <PurchaseInvoiceProvider>
+                          <SalesOrderProvider>
+                            <App />
+                          </SalesOrderProvider>
+                        </PurchaseInvoiceProvider>
                       </CustomerProvider>
                     </SupplierProvider>
                   </InventoryProvider>

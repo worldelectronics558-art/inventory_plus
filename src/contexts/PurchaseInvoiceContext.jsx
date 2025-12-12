@@ -1,4 +1,3 @@
-
 // src/contexts/PurchaseInvoiceContext.jsx
 
 import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
@@ -28,31 +27,37 @@ const generateInvoiceNumber = async (db, appId, invoiceDate) => {
         throw new Error("Invalid date provided for invoice number generation.");
     }
 
-    const year = d.getFullYear().toString().slice(-2);
-    const month = (d.getMonth() + 1).toString().padStart(2, '0');
-    
-    const counterId = `pi_counter_${year}${month}`;
-    const counterRef = doc(db, 'artifacts', appId, 'counters', counterId);
+    const counterRef = doc(db, 'artifacts', appId, 'counters', 'purchaseInvoiceCounter');
 
-    let nextNumber;
     try {
-        await runTransaction(db, async (transaction) => {
+        const newInvoiceNumberStr = await runTransaction(db, async (transaction) => {
             const counterDoc = await transaction.get(counterRef);
-            if (!counterDoc.exists()) {
-                nextNumber = 1;
-                transaction.set(counterRef, { count: nextNumber });
-            } else {
-                nextNumber = counterDoc.data().count + 1;
-                transaction.update(counterRef, { count: nextNumber });
-            }
-        });
-    } catch (e) {
-        console.error("Transaction failed: ", e);
-        throw new Error("Could not generate new invoice number.");
-    }
 
-    const formattedNumber = nextNumber.toString().padStart(3, '0');
-    return `PI-${year}${month}-${formattedNumber}`;
+            const year = d.getFullYear().toString().slice(-2);
+            const month = (d.getMonth() + 1).toString().padStart(2, '0');
+            const currentPeriod = `${year}${month}`;
+
+            let nextCount = 1;
+            if (counterDoc.exists()) {
+                const data = counterDoc.data();
+                if (data.lastResetPeriod === currentPeriod) {
+                    nextCount = data.currentCount + 1;
+                }
+            }
+
+            transaction.set(counterRef, {
+                currentCount: nextCount,
+                lastResetPeriod: currentPeriod
+            }, { merge: true });
+
+            const formattedCount = nextCount.toString().padStart(3, '0');
+            return `PI-${currentPeriod}-${formattedCount}`;
+        });
+        return newInvoiceNumberStr;
+    } catch (e) {
+        console.error("Failed to generate invoice number:", e);
+        throw new Error("Could not generate a new invoice number. Please try again.");
+    }
 };
 
 export const PurchaseInvoiceProvider = ({ children }) => {
