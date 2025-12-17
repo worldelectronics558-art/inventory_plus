@@ -1,6 +1,4 @@
 
-// src/pages/PurchaseSubPages/FinalizePurchaseInvoice.jsx
-
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { doc, runTransaction, collection, serverTimestamp } from 'firebase/firestore';
@@ -220,18 +218,53 @@ const FinalizePurchaseInvoice = () => {
     const relevantBatches = useMemo(() => {
         if (!invoiceForDisplay || !pendingReceivables) return {};
         const invoiceSkus = new Set(invoiceForDisplay.items.map(item => item.productId));
-        const relevantPRs = pendingReceivables.filter(pr => invoiceSkus.has(pr.sku) && (pr.quantity > 0 || pr.serials?.length > 0));
-        const grouped = relevantPRs.reduce((acc, pr) => {
-            const batchId = pr.batchId || `direct_${pr.id}`;
+    
+        const relevantPRs = pendingReceivables.filter(batch => 
+            batch.items.some(item => invoiceSkus.has(item.sku))
+        );
+    
+        const grouped = relevantPRs.reduce((acc, batch) => {
+            const batchId = batch.batchId;
             if (!acc[batchId]) {
-                acc[batchId] = { items: [], receivedBy: pr.createdBy?.name || 'N/A', receivedAt: pr.createdAt?.toDate ? pr.createdAt.toDate().toLocaleDateString() : 'N/A' };
+                acc[batchId] = {
+                    items: [],
+                    receivedBy: batch.createdBy?.name || 'N/A',
+                    receivedAt: batch.createdAt?.toDate ? batch.createdAt.toDate().toLocaleDateString() : 'N/A',
+                    // BUG FIX: Add a unique identifier for each batch to be used as a key.
+                    id: batch.id 
+                };
             }
-            const productInfo = productMap[pr.productId] || {};
-            const commonData = { ...pr, productName: getProductDisplayName(productInfo), locationName: locationMap[pr.locationId] || 'Unknown Location', originalReceivableId: pr.id };
-            if (pr.isSerialized) { pr.serials.forEach(serial => { acc[batchId].items.push({ ...commonData, id: `${pr.id}-${serial}`, quantity: 1, serial: serial }); });
-            } else { acc[batchId].items.push({ ...commonData, id: pr.id }); }
+    
+            batch.items.forEach(item => {
+                const productInfo = productMap[item.productId] || {};
+                const commonData = {
+                    ...item,
+                    productName: getProductDisplayName(productInfo),
+                    locationName: locationMap[item.locationId] || 'Unknown Location',
+                    originalReceivableId: batch.id, // The ID of the batch document
+                    batchId: batchId
+                };
+    
+                if (item.isSerialized) {
+                    item.serials.forEach(serial => {
+                        acc[batchId].items.push({
+                            ...commonData,
+                            id: `${batch.id}-${item.productId}-${serial}`,
+                            quantity: 1,
+                            serial: serial
+                        });
+                    });
+                } else {
+                    acc[batchId].items.push({
+                        ...commonData,
+                        id: `${batch.id}-${item.productId}`
+                    });
+                }
+            });
+    
             return acc;
         }, {});
+    
         return Object.keys(grouped).sort().reverse().reduce((obj, key) => ({...obj, [key]: grouped[key]}), {});
     }, [invoiceForDisplay, pendingReceivables, productMap, locationMap]);
 
@@ -333,7 +366,7 @@ const FinalizePurchaseInvoice = () => {
                                 {Object.entries(relevantBatches).map(([batchId, batch]) => {
                                     const isOpen = openBatches.has(batchId);
                                     return (
-                                    <div key={batchId} className="border rounded-lg bg-white shadow-sm">
+                                    <div key={batch.id} className="border rounded-lg bg-white shadow-sm">
                                         <header onClick={() => toggleBatch(batchId)} className="p-3 flex justify-between items-center cursor-pointer hover:bg-gray-50">
                                             <div className="flex flex-col">
                                                 <span className="font-bold text-gray-800">{batchId}</span>
