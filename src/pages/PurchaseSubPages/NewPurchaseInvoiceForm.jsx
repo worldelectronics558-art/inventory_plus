@@ -1,6 +1,4 @@
 
-// src/pages/PurchasingSubPages/NewPurchaseInvoiceForm.jsx
-
 import React, { useState, useMemo, useEffect } from 'react';
 import Select from 'react-select';
 import { useNavigate, Link } from 'react-router-dom';
@@ -31,7 +29,7 @@ const NewPurchaseInvoiceForm = () => {
     const { products } = useProducts();
     const { setAppProcessing, isProcessing } = useLoading();
     const { currentUser } = useUser();
-    const { userId } = useAuth(); // Correctly get userId from useAuth
+    const { userId } = useAuth();
 
     const [formState, setFormState] = useState(() => {
         const savedState = sessionStorage.getItem(SESSION_STORAGE_KEY);
@@ -39,14 +37,14 @@ const NewPurchaseInvoiceForm = () => {
             try {
                 const parsed = JSON.parse(savedState);
                 if (!Array.isArray(parsed.items) || parsed.items.length === 0) {
-                     parsed.items = [{ productId: null, quantity: 1, unitCost: 0, price: 0, tax: 0 }];
+                     parsed.items = [{ productId: null, quantity: 1, unitCostPrice: 0, unitInvoicePrice: 0, unitPurchaseGST: 0 }];
                 }
                 return parsed;
             } catch (e) {
-                return { supplierId: null, invoiceDate: new Date().toISOString().slice(0, 10), documentNumber: '', notes: '', items: [{ productId: null, quantity: 1, unitCost: 0, price: 0, tax: 0 }] };
+                return { supplierId: null, invoiceDate: new Date().toISOString().slice(0, 10), documentNumber: '', notes: '', items: [{ productId: null, quantity: 1, unitCostPrice: 0, unitInvoicePrice: 0, unitPurchaseGST: 0 }] };
             }
         } 
-        return { supplierId: null, invoiceDate: new Date().toISOString().slice(0, 10), documentNumber: '', notes: '', items: [{ productId: null, quantity: 1, unitCost: 0, price: 0, tax: 0 }] };
+        return { supplierId: null, invoiceDate: new Date().toISOString().slice(0, 10), documentNumber: '', notes: '', items: [{ productId: null, quantity: 1, unitCostPrice: 0, unitInvoicePrice: 0, unitPurchaseGST: 0 }] };
     });
 
     const { supplierId, invoiceDate, documentNumber, notes, items } = formState;
@@ -69,28 +67,28 @@ const NewPurchaseInvoiceForm = () => {
 
         currentItem[field] = value;
 
-        let unitCost = Number(currentItem.unitCost) || 0;
+        let unitCostPrice = Number(currentItem.unitCostPrice) || 0;
 
         if (field === 'productId') {
-            unitCost = value?.purchasePrice ?? 0;
-            currentItem.unitCost = unitCost;
+            unitCostPrice = value?.purchasePrice ?? 0;
+            currentItem.unitCostPrice = unitCostPrice;
         }
         
-        if (field === 'unitCost') {
-            unitCost = Number(value) || 0;
+        if (field === 'unitCostPrice') {
+            unitCostPrice = Number(value) || 0;
         }
 
-        const price = unitCost / (1 + GST_RATE);
-        const tax = price * GST_RATE;
+        const unitInvoicePrice = unitCostPrice / (1 + GST_RATE);
+        const unitPurchaseGST = unitInvoicePrice * GST_RATE;
 
-        currentItem.price = price;
-        currentItem.tax = tax;
+        currentItem.unitInvoicePrice = unitInvoicePrice;
+        currentItem.unitPurchaseGST = unitPurchaseGST;
 
         newItems[index] = currentItem;
         updateForm('items', newItems);
     };
 
-    const addNewItem = () => updateForm('items', [...items, { productId: null, quantity: 1, unitCost: 0, price: 0, tax: 0 }]);
+    const addNewItem = () => updateForm('items', [...items, { productId: null, quantity: 1, unitCostPrice: 0, unitInvoicePrice: 0, unitPurchaseGST: 0 }]);
     const removeItem = (index) => {
         if (items.length > 1) updateForm('items', items.filter((_, i) => i !== index));
     };
@@ -98,11 +96,10 @@ const NewPurchaseInvoiceForm = () => {
     const totals = useMemo(() => {
         return items.reduce((acc, item) => {
             const quantity = Number(item.quantity) || 0;
-            const price = Number(item.price) || 0;
-            const tax = Number(item.tax) || 0;
-            acc.totalPreTax += price * quantity;
-            acc.totalTax += tax * quantity;
-            acc.grandTotal = acc.totalPreTax + acc.totalTax;
+            const itemTotal = (item.unitInvoicePrice + item.unitPurchaseGST) * quantity;
+            acc.totalPreTax += item.unitInvoicePrice * quantity;
+            acc.totalTax += item.unitPurchaseGST * quantity;
+            acc.grandTotal += itemTotal;
             return acc;
         }, { totalPreTax: 0, totalTax: 0, grandTotal: 0 });
     }, [items]);
@@ -110,7 +107,7 @@ const NewPurchaseInvoiceForm = () => {
     const handleSubmit = async (e) => {
         e.preventDefault();
 
-        if (!userId) { // Check for userId
+        if (!userId) {
             alert('Authentication error: User ID not found. Please try logging in again.');
             return;
         }
@@ -133,11 +130,11 @@ const NewPurchaseInvoiceForm = () => {
                 if (!product) throw new Error(`Details for product with SKU ${item.productId.value} could not be found.`);
                 return {
                     productId: item.productId.value,
-                    productName: product.name,
+                    productName: getProductDisplayName(product),
                     quantity: Number(item.quantity),
-                    unitCost: roundToTwo(Number(item.unitCost)), 
-                    price: roundToTwo(Number(item.price)),       
-                    tax: roundToTwo(Number(item.tax)), 
+                    unitCostPrice: roundToTwo(Number(item.unitCostPrice)), 
+                    unitInvoicePrice: roundToTwo(Number(item.unitInvoicePrice)),       
+                    unitPurchaseGST: roundToTwo(Number(item.unitPurchaseGST)), 
                 };              
             }),
             totalPreTax: roundToTwo(totals.totalPreTax), 
@@ -145,10 +142,10 @@ const NewPurchaseInvoiceForm = () => {
             totalAmount: roundToTwo(totals.grandTotal),
         };
         
-        const userForAction = { ...currentUser, uid: userId }; // Create user object with uid property
+        const userForAction = { ...currentUser, uid: userId };
 
         try {
-            await addInvoice(invoiceData, userForAction); // Pass the correctly structured user object
+            await addInvoice(invoiceData, userForAction);
             sessionStorage.removeItem(SESSION_STORAGE_KEY);
             navigate('/purchase');
         } catch (error) {
@@ -215,16 +212,16 @@ const NewPurchaseInvoiceForm = () => {
                                     <input type="number" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', e.target.value)} min="1" className="input-base w-full text-center" required />
                                 </div>
                                 <div className="col-span-2">
-                                    <input type="number" value={item.unitCost} onChange={(e) => handleItemChange(index, 'unitCost', e.target.value)} min="0" step="0.01" className="input-base w-full text-right" required />
+                                    <input type="number" value={item.unitCostPrice} onChange={(e) => handleItemChange(index, 'unitCostPrice', e.target.value)} min="0" step="0.01" className="input-base w-full text-right" required />
                                 </div>
                                 <div className="col-span-2">
-                                    <input type="text" value={roundToTwo(item.price).toFixed(2)} className="input-base w-full text-right bg-gray-100" readOnly disabled/>
+                                    <input type="text" value={roundToTwo(item.unitInvoicePrice).toFixed(2)} className="input-base w-full text-right bg-gray-100" readOnly disabled/>
                                 </div>
                                 <div className="col-span-2">
-                                     <input type="text" value={roundToTwo(item.tax).toFixed(2)} className="input-base w-full text-right bg-gray-100" readOnly disabled/>
+                                     <input type="text" value={roundToTwo(item.unitPurchaseGST).toFixed(2)} className="input-base w-full text-right bg-gray-100" readOnly disabled/>
                                 </div>
                                 <div className="col-span-1 text-right font-medium">
-                                    Rs {roundToTwo(item.unitCost * (Number(item.quantity) || 0)).toFixed(2)}
+                                    Rs {roundToTwo(item.unitCostPrice * (Number(item.quantity) || 0)).toFixed(2)}
                                 </div>
                                 <div className="col-span-1 flex items-center justify-center">
                                     {items.length > 1 && (

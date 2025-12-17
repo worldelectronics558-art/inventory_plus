@@ -1,168 +1,258 @@
 
 // src/pages/SalesSubPages/FinalizeSalesOrder.jsx
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { useUser } from '../../contexts/UserContext';
+import React, { useState, useMemo, useCallback } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { doc, runTransaction, collection, serverTimestamp, increment } from 'firebase/firestore';
+
+// --- Contexts ---
 import { useAuth } from '../../contexts/AuthContext';
-import { useSalesOrders } from '../../contexts/SalesOrderContext';
-import { useInventory } from '../../contexts/InventoryContext';
+import { useUser } from '../../contexts/UserContext';
+import { useSalesOrders, } from '../../contexts/SalesOrderContext';
 import { usePendingDeliverables } from '../../contexts/PendingDeliverablesContext';
-import { getProductDisplayName } from '../../utils/productUtils';
-import { ChevronLeft, CheckCircle } from 'lucide-react';
+import { useProducts } from '../../contexts/ProductContext';
 import { useLoading } from '../../contexts/LoadingContext';
-import { useSync } from '../../contexts/SyncContext';
+
+// --- Utils & Components ---
+import { getProductDisplayName } from '../../utils/productUtils';
+import { ChevronLeft, CheckCircle, ShieldCheck, AlertTriangle } from 'lucide-react';
+import LoadingSpinner from '../../components/LoadingOverlay';
 
 const FinalizeSalesOrder = () => {
     const navigate = useNavigate();
-    const { state } = useLocation();
-    const { order } = state || {};
+    const { deliverableId } = useParams();
 
-    const { currentUser: user } = useUser();
-    const { removeStockItems, isLoading: isSalesOrderLoading } = useSalesOrders(); // Correct hook and function name
-    const { addToQueue, isSyncing } = useSync();
-    const { inventoryItems, isLoading: isInventoryLoading } = useInventory();
+    // --- Hooks ---
+    const { db, appId, userId, authReady } = useAuth();
+    const { currentUser, isLoading: isUserLoading } = useUser();
+    const { setMutationDisabled, isMutationDisabled } = useSalesOrders();
     const { pendingDeliverables, isLoading: isDeliverablesLoading } = usePendingDeliverables();
+    const { products, isLoading: isProductsLoading } = useProducts();
     const { setAppProcessing } = useLoading();
 
-    const [orderItems, setOrderItems] = useState([]);
-    const [formError, setFormError] = useState('');
+    // --- State ---
+    const [pin, setPin] = useState('');
+    const [error, setError] = useState('');
 
-    const matchedOrderItems = useMemo(() => {
-        if (!order || !order.items || isDeliverablesLoading || isInventoryLoading) return [];
+    // --- Memoized Data ---
+    const deliverable = useMemo(() => pendingDeliverables.find(d => d.id === deliverableId), [pendingDeliverables, deliverableId]);
+    const productMap = useMemo(() => products.reduce((acc, p) => ({ ...acc, [p.id]: p }), {}), [products]);
 
-        return order.items.map(orderItem => {
-            const matchedDeliverables = pendingDeliverables.filter(d => 
-                d.locationId === order.locationId && d.sku === orderItem.sku
-            );
+    // --- Main Transaction Logic (Re-architected to mirror FinalizePurchaseInvoice) ---
+    const handleFinalizeDelivery = useCallback(async () => {
+        setError('');
+        if (!userId || !currentUser) { setError('User data not available. Please try again.'); return; }
+        if (pin !== '1234') { setError('Invalid PIN. Delivery cannot be confirmed.'); return; }
+        if (!db || !appId || !deliverable) { setError('Critical data is missing. Please refresh and try again.'); return; }
 
-            const units = matchedDeliverables.flatMap(d => d.serials.map(serial => {
-                const inventoryItem = inventoryItems.find(inv => inv.serial === serial && inv.sku === d.sku);
-                return {
-                    serial,
-                    inventoryItem: inventoryItem || null,
-                    pendingDeliverableId: d.id
-                };
-            }));
-            
-            return {
-                ...orderItem,
-                units: units.slice(0, orderItem.quantity)
-            };
-        });
-    }, [order, pendingDeliverables, inventoryItems, isDeliverablesLoading, isInventoryLoading]);
+        setAppProcessing(true, 'Finalizing delivery...');
+        setMutationDisabled(true);
 
-    useEffect(() => {
-        if (order) {
-            setOrderItems(matchedOrderItems);
-        } else {
-            navigate('/sales');
-        }
-    }, [matchedOrderItems, order, navigate]);
-
-    const handleFinalize = async () => {
-        setFormError('');
-        if (!user) {
-            setFormError('User data not available. Please try again.');
-            return;
-        }
-
-        const allUnitsValid = orderItems.every(item => item.units.length === item.quantity && item.units.every(u => u.inventoryItem));
-        if (!allUnitsValid) {
-            setFormError("All items must have the correct quantity of verified serial numbers before finalizing.");
-            return;
-        }
-
-        const itemsForStockOut = orderItems.flatMap(item => item.units.map(u => u.inventoryItem).filter(Boolean));
-        const pendingDeliverableIds = [...new Set(orderItems.flatMap(item => item.units.map(u => u.pendingDeliverableId)))];
-        
-        const updatedOrderData = {
-            items: orderItems.map(item => ({
-                sku: item.sku,
-                name: item.name,
-                quantity: item.quantity,
-                units: item.units.map(u => ({ serial: u.serial, inventoryId: u.inventoryItem?.id }))
-            })),
-        };
-
-        setAppProcessing(true, 'Finalizing sales order...');
+        const isDirectDelivery = deliverable.salesOrderId === 'direct-delivery';
 
         try {
-            // Use the correctly named function
-            await removeStockItems(order.id, updatedOrderData, pendingDeliverableIds);
+            await runTransaction(db, async (transaction) => {
+                // --- Reference Definitions ---
+                const deliverableRef = doc(db, `artifacts/${appId}/pending_deliverables`, deliverable.id);
+                const salesRecordsRef = collection(db, `artifacts/${appId}/sales_records`);
+                const historyCollectionRef = collection(db, `artifacts/${appId}/item_history`);
+                const soRef = isDirectDelivery ? null : doc(db, `artifacts/${appId}/sales_orders`, deliverable.salesOrderId);
 
-            await addToQueue('STOCK_OUT', itemsForStockOut, user);
-            
-            setAppProcessing(false);
-            alert('Sales order finalized and queued for syncing!');
+                // --- PHASE 1: READS ---
+                const deliverableDoc = await transaction.get(deliverableRef);
+                if (!deliverableDoc.exists()) throw new Error("Deliverable not found. It may have been processed already.");
+
+                const soDoc = soRef ? await transaction.get(soRef) : null;
+                if (soRef && !soDoc.exists()) throw new Error("The associated Sales Order could not be found.");
+
+                const inventoryItemIds = deliverable.items.map(item => item.inventoryItemId).filter(Boolean);
+                if (inventoryItemIds.length !== deliverable.items.length) {
+                    throw new Error("Data inconsistency: Not all delivery items have an inventory ID. The batch may be corrupt.");
+                }
+
+                const inventoryDocsPromise = inventoryItemIds.map(id => transaction.get(doc(db, `artifacts/${appId}/inventory_items`, id)));
+                const inventoryDocs = await Promise.all(inventoryDocsPromise);
+                const inventoryDataMap = inventoryDocs.reduce((acc, doc) => {
+                    if (doc.exists()) acc[doc.id] = doc.data();
+                    return acc;
+                }, {});
+                
+                // --- PHASE 2: PROCESS & PREPARE WRITES ---
+                const salesOrderData = soDoc ? soDoc.data() : null;
+                const updatedSoItems = soDoc ? JSON.parse(JSON.stringify(salesOrderData.items)) : null;
+                const stockSummaryUpdates = new Map();
+                
+                for (const item of deliverable.items) {
+                    const invItemData = inventoryDataMap[item.inventoryItemId];
+                    if (!invItemData) throw new Error(`Inventory item ${item.inventoryItemId} could not be found.`);
+                    if (invItemData.status !== 'in_stock') throw new Error(`Stock for ${item.productName} is no longer available.`);
+
+                    const invItemRef = doc(db, `artifacts/${appId}/inventory_items`, item.inventoryItemId);
+                    const soItemForPrice = updatedSoItems?.find(i => i.productId === item.productId);
+
+                    // 1. Prepare Inventory Item Update
+                    const deliveryDetails = {
+                        finalizedBy: { uid: userId, name: currentUser.displayName || 'N/A' },
+                        finalizedAt: serverTimestamp(),
+                        ...(isDirectDelivery 
+                            ? { customerName: 'Direct Delivery' } 
+                            : { salesOrderId: deliverable.salesOrderId, salesOrderNumber: deliverable.salesOrderNumber, customerId: salesOrderData.customerId, customerName: salesOrderData.customerName })
+                    };
+                    
+                    if (item.isSerialized) {
+                        transaction.update(invItemRef, { status: 'delivered', deliveryDetails });
+                    } else {
+                        if (invItemData.quantity < item.quantity) throw new Error(`Not enough quantity for ${item.productName}.`);
+                        transaction.update(invItemRef, { quantity: increment(-item.quantity), status: invItemData.quantity === item.quantity ? 'delivered' : 'in_stock', deliveryDetails });
+                    }
+
+                    // 2. Prepare Sales Record Creation
+                    transaction.set(doc(salesRecordsRef), {
+                        productId: item.productId, productName: item.productName, quantity: item.quantity, isSerialized: item.isSerialized, serial: item.serial || null,
+                        salesOrderId: deliverable.salesOrderId, salesOrderNumber: deliverable.salesOrderNumber || 'N/A',
+                        customerId: isDirectDelivery ? null : salesOrderData.customerId,
+                        customerName: isDirectDelivery ? 'Direct Delivery' : salesOrderData.customerName,
+                        locationId: item.locationId,
+                        unitSalePrice: soItemForPrice?.unitSalePrice || 0, // Price comes from SO if it exists
+                        unitRetailPrice: soItemForPrice?.unitRetailPrice || 0,
+                        unitSaleGST: soItemForPrice?.unitSaleGST || 0,
+                        unitCostPrice: invItemData.unitCostPrice || 0, // Cost comes from the specific inventory item
+                        finalizedAt: serverTimestamp(),
+                        finalizedBy: { uid: userId, name: currentUser.displayName || 'N/A' }, appId: appId,
+                    });
+
+                    // 3. Prepare History Log Creation
+                    transaction.set(doc(historyCollectionRef), {
+                        type: "STOCK_DELIVERED", timestamp: serverTimestamp(), user: { uid: userId, name: currentUser.displayName || 'N/A' },
+                        inventoryItemId: item.inventoryItemId, productId: item.productId, sku: item.sku, serial: item.serial || null,
+                        quantity: item.quantity, locationId: item.locationId,
+                        context: isDirectDelivery
+                            ? { type: "DIRECT_DELIVERY", documentId: deliverable.id, customerName: 'Direct Delivery' }
+                            : { type: "SALES_ORDER", documentId: deliverable.salesOrderId, documentNumber: deliverable.salesOrderNumber, customerId: salesOrderData.customerId, customerName: salesOrderData.customerName }
+                    });
+                    
+                    // 4. Aggregate Sales Order and Stock Summary Updates
+                    if (updatedSoItems) {
+                        const soItemToUpdate = updatedSoItems.find(i => i.productId === item.productId);
+                        if (soItemToUpdate) soItemToUpdate.deliveredQty = (soItemToUpdate.deliveredQty || 0) + item.quantity;
+                    }
+                    
+                    const stockUpdate = stockSummaryUpdates.get(item.productId) || { qty: 0, locationId: item.locationId };
+                    stockSummaryUpdates.set(item.productId, { qty: stockUpdate.qty + item.quantity, locationId: item.locationId });
+                }
+
+                // --- PHASE 3: WRITES ---
+                for (const [productId, update] of stockSummaryUpdates.entries()) {
+                    const productRef = doc(db, `artifacts/${appId}/products`, productId);
+                    const locationStockField = `stockSummary.byLocation.${update.locationId}`;
+                    transaction.update(productRef, { 'stockSummary.totalInStock': increment(-update.qty), [locationStockField]: increment(-update.qty) });
+                }
+
+                if (soRef && updatedSoItems) {
+                    const isFullyDelivered = updatedSoItems.every(item => item.deliveredQty >= item.quantity);
+                    transaction.update(soRef, { items: updatedSoItems, status: isFullyDelivered ? 'FINALIZED' : 'PARTIALLY DELIVERED', lastUpdatedAt: serverTimestamp() });
+                }
+
+                transaction.delete(deliverableRef);
+            });
+
+            alert('Delivery finalized successfully!');
             navigate('/sales');
-
         } catch (error) {
             console.error("Finalization failed:", error);
-            setFormError(`Finalization failed: ${error.message}`);
+            setError(`Finalization failed: ${error.message}`);
+        } finally {
             setAppProcessing(false);
+            setMutationDisabled(false);
         }
-    };
+    }, [db, appId, userId, currentUser, deliverable, pin, navigate, setAppProcessing, setMutationDisabled]);
 
-    if (!order) return <div className="page-container"><p>No order data provided. Redirecting...</p></div>;
-    const isLoading = isInventoryLoading || isDeliverablesLoading || isSalesOrderLoading;
-    if (isLoading) return <div className="page-container"><p>Loading order and inventory data...</p></div>;
+    const isLoading = !authReady || isDeliverablesLoading || isProductsLoading || isUserLoading;
+    if (isLoading) return <LoadingSpinner>Loading delivery details...</LoadingSpinner>;
+    if (!deliverable && !isLoading) return (
+        <div className="page-container text-center">
+            <p className="text-lg">This delivery is no longer available.</p>
+            <Link to="/sales/pending-deliverables" className="btn btn-primary mt-4">Return to Deliveries</Link>
+        </div>
+    );
 
     return (
-        <div className="page-container">
+        <div className="page-container bg-gray-50">
             <header className="page-header">
-                <h1 className="page-title">Finalize Sales Order</h1>
+                 <div>
+                    <Link to="/sales/pending-deliverables" className="flex items-center text-sm font-medium text-gray-500 hover:text-gray-700 mb-1"><ChevronLeft size={16} className="mr-1" /> Back to Pending Deliveries</Link>
+                    <h1 className="page-title">Confirm Delivery</h1>
+                </div>
                 <div className="page-actions">
-                    <button onClick={() => navigate(-1)} className="btn btn-ghost"> <ChevronLeft size={20} /> Back </button>
-                    <button onClick={handleFinalize} className="btn btn-primary" disabled={isSyncing || isLoading}> <CheckCircle size={20} /> Finalize Order </button>
+                    <button onClick={handleFinalizeDelivery} className="btn btn-primary" disabled={isMutationDisabled || !pin}>
+                        <CheckCircle size={20} className="mr-2" /> Finalize Delivery
+                    </button>
                 </div>
             </header>
 
-            <div className="page-content">
-                {formError && <div className="alert alert-error"><span>{formError}</span></div>}
-
+            <div className="page-content max-w-4xl mx-auto">
+                {error && (
+                    <div className="alert alert-error mb-4">
+                         <AlertTriangle size={20} />
+                        <span>{error}</span>
+                    </div>
+                )}
+                {deliverable && (
                 <div className="card bg-base-100 shadow-lg">
                     <div className="card-body">
-                        <h2 className="card-title text-2xl">Order Summary: {order.orderNumber}</h2>
-                        <p><strong>Customer:</strong> {order.customerName}</p>
-                        <p><strong>Location:</strong> {order.locationId}</p>
-                        <div className="divider"></div>
-                        <h3 className="text-xl font-semibold">Items to be Delivered</h3>
-                        <div className="overflow-x-auto">
+                        <h2 className="card-title text-2xl">Batch: {deliverable.batchId}</h2>
+                        <p className="text-gray-600"><strong>Sales Order:</strong> {deliverable.salesOrderNumber}</p>
+                        <p className="text-gray-600"><strong>Customer:</strong> {deliverable.customerName}</p>
+                        
+                        <div className="divider my-4"></div>
+                        
+                        <h3 className="text-xl font-semibold mb-3">Items for Delivery</h3>
+                        <div className="overflow-x-auto border rounded-lg">
                             <table className="table w-full">
-                                <thead>
+                                <thead className="bg-gray-50">
                                     <tr>
-                                        <th>Product</th>
-                                        <th>SKU</th>
-                                        <th>Required</th>
-                                        <th>Assigned Serials</th>
+                                        <th className='p-3'>Product</th>
+                                        <th className='p-3'>Quantity</th>
+                                        <th className='p-3'>Serial(s)</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {orderItems.map((item, index) => (
-                                        <tr key={index}>
-                                            <td>{getProductDisplayName(item)}</td>
-                                            <td>{item.sku}</td>
-                                            <td>{item.quantity}</td>
-                                            <td>
-                                                {item.units.length > 0 ? (
-                                                    <ul className="list-disc list-inside bg-gray-100 p-2 rounded-md">
-                                                        {item.units.map((unit, uIndex) => (
-                                                            <li key={uIndex} className={unit.inventoryItem ? 'text-green-600' : 'text-red-500'}>
-                                                                {unit.serial} {unit.inventoryItem ? '' : ' (Invalid)'}
-                                                            </li>
-                                                        ))}
-                                                    </ul>
-                                                ) : <span className='text-yellow-600'>No units assigned</span>}
-                                                {item.units.length < item.quantity && <p className='text-red-500 text-xs mt-1'>Missing {item.quantity - item.units.length} unit(s).</p>}
-                                            </td>
-                                        </tr>
-                                    ))}
+                                    {deliverable.items.map((item, index) => {
+                                        const productInfo = productMap[item.productId];
+                                        return (
+                                            <tr key={index} className="border-b last:border-b-0">
+                                                <td className='p-3 font-medium'>{getProductDisplayName(productInfo || { name: item.productName })}</td>
+                                                <td className='p-3'>{item.quantity}</td>
+                                                <td className='p-3 font-mono text-sm'>
+                                                    {item.isSerialized ? item.serial : 'N/A'}
+                                                </td>
+                                            </tr>
+                                        )
+                                    })}
                                 </tbody>
                             </table>
                         </div>
+
+                        <div className="divider my-4"></div>
+
+                        <div className="max-w-sm mx-auto bg-blue-50 p-4 rounded-lg border border-blue-200">
+                            <label className="label justify-center">
+                                <ShieldCheck size={24} className="mr-2 text-blue-600"/>
+                                <span className="label-text text-lg font-bold text-blue-800">Driver Confirmation PIN</span>
+                            </label>
+                            <input 
+                                type="password" 
+                                value={pin}
+                                onChange={(e) => setPin(e.target.value)}
+                                className="input input-bordered w-full text-center text-xl tracking-widest mt-2" 
+                                placeholder="****"
+                                maxLength={4}
+                            />
+                             <p className='text-xs text-center text-gray-500 mt-2'>Enter the 4-digit PIN to finalize this delivery.</p>
+                        </div>
                     </div>
                 </div>
+                )}
             </div>
         </div>
     );

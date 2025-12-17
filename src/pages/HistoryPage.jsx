@@ -7,7 +7,6 @@ import Select from 'react-select';
 import { subDays, startOfDay, endOfDay } from 'date-fns';
 
 // Contexts & Utils
-import { useInventory } from '../contexts/InventoryContext';
 import { useProducts } from '../contexts/ProductContext';
 import { formatDate } from '../utils/formatDate';
 import { getProductDisplayName } from '../utils/productUtils';

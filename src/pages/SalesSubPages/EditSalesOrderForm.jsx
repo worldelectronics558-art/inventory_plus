@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import Select from 'react-select';
 import { useNavigate, Link, useParams } from 'react-router-dom';
@@ -38,14 +37,21 @@ const EditSalesOrderForm = () => {
             const orderToEdit = salesOrders.find(o => o.id === id);
             if (orderToEdit) {
                 setOrder(orderToEdit);
-                const items = (orderToEdit.items || []).map(item => ({
-                    ...item,
-                    unitPrice: item.unitPrice || 0,
-                    productId: productOptions.find(p => p.value === item.productId) || null,
-                }));
+                const items = (orderToEdit.items || []).map(item => {
+                    const unitSalePrice = item.unitSalePrice ?? item.unitPrice ?? 0;
+                    const unitRetailPrice = item.unitRetailPrice ?? (unitSalePrice / (1 + GST_RATE));
+                    const unitSaleGST = item.unitSaleGST ?? (unitRetailPrice * GST_RATE);
+                    return {
+                        ...item,
+                        unitSalePrice,
+                        unitRetailPrice,
+                        unitSaleGST,
+                        productId: productOptions.find(p => p.value === item.productId) || null,
+                    };
+                });
 
                 if (items.length === 0) {
-                    items.push({ productId: null, quantity: 1, unitPrice: 0, price: 0, tax: 0 });
+                    items.push({ productId: null, quantity: 1, unitSalePrice: 0, unitRetailPrice: 0, unitSaleGST: 0 });
                 }
 
                 setFormState({
@@ -67,28 +73,29 @@ const EditSalesOrderForm = () => {
 
         currentItem[field] = value;
 
-        let unitPrice = Number(currentItem.unitPrice) || 0;
+        let unitSalePrice = Number(currentItem.unitSalePrice) || 0;
 
         if (field === 'productId') {
-            unitPrice = value?.salePrice ?? 0;
-            currentItem.unitPrice = unitPrice;
+            unitSalePrice = value?.salePrice ?? 0;
+            currentItem.unitSalePrice = unitSalePrice;
+            currentItem.productName = value?.label;
         }
         
-        if (field === 'unitPrice') {
-            unitPrice = Number(value) || 0;
+        if (field === 'unitSalePrice') {
+            unitSalePrice = Number(value) || 0;
         }
 
-        const price = unitPrice / (1 + GST_RATE);
-        const tax = price * GST_RATE;
+        const unitRetailPrice = unitSalePrice / (1 + GST_RATE);
+        const unitSaleGST = unitRetailPrice * GST_RATE;
 
-        currentItem.price = price;
-        currentItem.tax = tax;
+        currentItem.unitRetailPrice = unitRetailPrice;
+        currentItem.unitSaleGST = unitSaleGST;
 
         newItems[index] = currentItem;
         setFormState(prevState => ({...prevState, items: newItems}));
     };
 
-    const addNewItem = () => setFormState(prevState => ({...prevState, items: [...prevState.items, { productId: null, quantity: 1, unitPrice: 0, price: 0, tax: 0 }]}));
+    const addNewItem = () => setFormState(prevState => ({...prevState, items: [...prevState.items, { productId: null, quantity: 1, unitSalePrice: 0, unitRetailPrice: 0, unitSaleGST: 0 }]}));
     
     const removeItem = (index) => {
         if (formState.items.length > 1) {
@@ -100,11 +107,9 @@ const EditSalesOrderForm = () => {
         if (!formState) return { totalPreTax: 0, totalTax: 0, grandTotal: 0 };
         return formState.items.reduce((acc, item) => {
             const quantity = Number(item.quantity) || 0;
-            const price = Number(item.price) || 0;
-            const tax = Number(item.tax) || 0;
-            acc.totalPreTax += price * quantity;
-            acc.totalTax += tax * quantity;
-            acc.grandTotal = acc.totalPreTax + acc.totalTax;
+            acc.totalPreTax += item.unitRetailPrice * quantity;
+            acc.totalTax += item.unitSaleGST * quantity;
+            acc.grandTotal += (item.unitRetailPrice + item.unitSaleGST) * quantity;
             return acc;
         }, { totalPreTax: 0, totalTax: 0, grandTotal: 0 });
     }, [formState]);
@@ -117,17 +122,20 @@ const EditSalesOrderForm = () => {
         }
 
         const updatedOrderData = {
-            ...formState,
+            id: id,
             customerId: formState.customerId.value,
             customerName: formState.customerId.label,
             orderDate: new Date(formState.orderDate),
+            documentNumber: formState.documentNumber,
+            notes: formState.notes,
             items: formState.items.map(item => ({
-                ...item,
                 productId: item.productId.value,
-                productName: item.productId.label,
-                unitPrice: roundToTwo(Number(item.unitPrice)),
-                price: roundToTwo(Number(item.price)),
-                tax: roundToTwo(Number(item.tax)),
+                productName: item.productName,
+                quantity: Number(item.quantity),
+                unitSalePrice: roundToTwo(Number(item.unitSalePrice)),
+                unitRetailPrice: roundToTwo(Number(item.unitRetailPrice)),
+                unitSaleGST: roundToTwo(Number(item.unitSaleGST)),
+                deliveredQty: item.deliveredQty || 0, // Preserve existing deliveredQty
             })),
             totalPreTax: roundToTwo(totals.totalPreTax),
             totalTax: roundToTwo(totals.totalTax),
@@ -218,16 +226,16 @@ const EditSalesOrderForm = () => {
                                     <input type="number" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', e.target.value)} min="1" className="input-base w-full text-center" required />
                                 </div>
                                 <div className="col-span-2">
-                                    <input type="number" value={item.unitPrice} onChange={(e) => handleItemChange(index, 'unitPrice', e.target.value)} min="0" step="0.01" className="input-base w-full text-right" required />
+                                    <input type="number" value={item.unitSalePrice} onChange={(e) => handleItemChange(index, 'unitSalePrice', e.target.value)} min="0" step="0.01" className="input-base w-full text-right" required />
                                 </div>
                                 <div className="col-span-2">
-                                    <input type="text" value={roundToTwo(item.price).toFixed(2)} className="input-base w-full text-right bg-gray-100" readOnly disabled/>
+                                    <input type="text" value={roundToTwo(item.unitRetailPrice).toFixed(2)} className="input-base w-full text-right bg-gray-100" readOnly disabled/>
                                 </div>
                                 <div className="col-span-2">
-                                     <input type="text" value={roundToTwo(item.tax).toFixed(2)} className="input-base w-full text-right bg-gray-100" readOnly disabled/>
+                                     <input type="text" value={roundToTwo(item.unitSaleGST).toFixed(2)} className="input-base w-full text-right bg-gray-100" readOnly disabled/>
                                 </div>
                                 <div className="col-span-1 text-right font-medium">
-                                    Rs {roundToTwo(item.unitPrice * (Number(item.quantity) || 0)).toFixed(2)}
+                                    Rs {roundToTwo(item.unitSalePrice * (Number(item.quantity) || 0)).toFixed(2)}
                                 </div>
                                 <div className="col-span-1 flex items-center justify-center">
                                     {formState.items.length > 1 && (

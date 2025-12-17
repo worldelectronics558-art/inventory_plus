@@ -8,14 +8,8 @@ import { Routes, Route } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext.jsx';
 import { useUser } from './contexts/UserContext.jsx';
 import { useProducts } from './contexts/ProductContext.jsx';
-import { useInventory } from './contexts/InventoryContext.jsx';
-import { LocationProvider } from './contexts/LocationContext.jsx';
 import { useCustomers } from './contexts/CustomerContext.jsx';
 import { useLoading } from './contexts/LoadingContext';
-import { PurchaseInvoiceProvider } from './contexts/PurchaseInvoiceContext.jsx';
-import { SalesOrderProvider } from './contexts/SalesOrderContext.jsx';
-import { PendingReceivablesProvider } from './contexts/PendingReceivablesContext.jsx';
-import { PendingDeliverablesProvider } from './contexts/PendingDeliverablesContext.jsx';
 import LoadingOverlay from './components/LoadingOverlay';
 import MainLoadingOverlay from './components/MainLoadingOverlay';
 
@@ -63,11 +57,6 @@ import ProductsImportForm from './pages/ProductsSubPages/ProductsImportForm.jsx'
 import ProductDetailsPage from './pages/ProductsSubPages/ProductDetailsPage.jsx';
 import ProductHistoryPage from './pages/ProductsSubPages/ProductHistoryPage.jsx';
 
-// Inventory Sub-Pages
-import StockInForm from './pages/InventorySubPages/StockInForm.jsx';
-import StockOutForm from './pages/InventorySubPages/StockOutForm.jsx';
-import TransferForm from './pages/InventorySubPages/TransferForm.jsx';
-
 const useMediaQuery = (query) => {
     const [matches, setMatches] = useState(window.matchMedia(query).matches);
     useEffect(() => {
@@ -95,11 +84,10 @@ const AppContent = () => {
     const { isAuthenticated: isAuthContextAuthenticated, authReady } = useAuth();
     const { userPermissions, isLoading: isUserLoading } = useUser();
     const { isLoading: isProductsLoading } = useProducts();
-    const { isLoading: isInventoryLoading } = useInventory();
     const { isLoading: isCustomersLoading } = useCustomers();
     const { isAppProcessing } = useLoading();
 
-    const isDataLoading = isAuthContextAuthenticated && (isUserLoading || isProductsLoading || isInventoryLoading || isCustomersLoading);
+    const isDataLoading = isAuthContextAuthenticated && (isUserLoading || isProductsLoading || isCustomersLoading);
     const isAppLoading = !authReady || isDataLoading;
     const isAuthenticated = userPermissions.isAuthenticated || isAuthContextAuthenticated;
 
@@ -116,65 +104,52 @@ const AppContent = () => {
     }
 
     return (
-        <PurchaseInvoiceProvider>
-            <SalesOrderProvider>
-                <PendingReceivablesProvider>
-                    <PendingDeliverablesProvider>
-                        <LocationProvider>
-                            <div className="min-h-screen bg-gray-100">
-                                <Sidebar isCollapsed={isSidebarCollapsed} isDesktop={isDesktop} isMobileMenuOpen={isMobileMenuOpen} onCloseMobileMenu={closeMobileMenu} />
-                                <Header isSidebarCollapsed={isSidebarCollapsed} isDesktop={isDesktop} onToggleCollapse={toggleSidebarCollapse} onOpenMobileMenu={openMobileMenu} />
-                                {isAppProcessing && <LoadingOverlay />}
-                                <main className={`flex-1 transition-all duration-300 ${mainContentClass} mt-16 p-3 md:p-6 overflow-hidden`}>
-                                    <Routes>
-                                        <Route path="/" element={<DashboardPage />} />
-                                        <Route path="/products" element={<ProductsPage />} />
-                                        <Route path="/products/add" element={<AddProductForm />} />
-                                        <Route path="/products/bulk-import" element={<ProductsImportForm />} />
-                                        <Route path="/products/edit/:id" element={<EditProductForm />} />
-                                        <Route path="/products/details/:id" element={<ProductDetailsPage />} />
-                                        <Route path="/products/history/:sku" element={<ProductHistoryPage />} />
-                                        <Route path="/inventory" element={<InventoryPage />} />
-                                        <Route path="/inventory/stock-in" element={<StockInForm />} />
-                                        <Route path="/inventory/stock-out" element={<StockOutForm />} />
-                                        <Route path="/inventory/transfer" element={<TransferForm />} />
-                                        
-                                        <Route path="/purchase" element={<PurchasePage />} />
-                                        <Route path="/purchase/new" element={<NewPurchaseInvoiceForm />} />
-                                        <Route path="/purchase/edit/:id" element={<EditPurchaseInvoiceForm />} />
-                                        <Route path="/purchase/view/:id" element={<ViewPurchaseInvoicePage />} />
-                                        <Route path="/purchase/receive" element={<StockReceivePage />} />
-                                        <Route path="/purchase/finalize/:invoiceId" element={<FinalizePurchaseInvoice />} />
-                                        <Route path="/purchase/pending-receivables" element={<PendingReceivablesPage />} />
-                                        
-                                        <Route path="/suppliers" element={<SuppliersPage />} />
-                                        <Route path="/suppliers/new" element={<NewSupplierForm />} />
-                                        <Route path="/suppliers/:id" element={<SupplierDetailsPage />} />
-                                        <Route path="/suppliers/:id/edit" element={<EditSupplierForm />} />
+        <div className="min-h-screen bg-gray-100">
+            <Sidebar isCollapsed={isSidebarCollapsed} isDesktop={isDesktop} isMobileMenuOpen={isMobileMenuOpen} onCloseMobileMenu={closeMobileMenu} />
+            <Header isSidebarCollapsed={isSidebarCollapsed} isDesktop={isDesktop} onToggleCollapse={toggleSidebarCollapse} onOpenMobileMenu={openMobileMenu} />
+            {isAppProcessing && <LoadingOverlay />}
+            <main className={`flex-1 transition-all duration-300 ${mainContentClass} mt-16 p-3 md:p-6 overflow-hidden`}>
+                <Routes>
+                    <Route path="/" element={<DashboardPage />} />
+                    <Route path="/products" element={<ProductsPage />} />
+                    <Route path="/products/add" element={<AddProductForm />} />
+                    <Route path="/products/bulk-import" element={<ProductsImportForm />} />
+                    <Route path="/products/edit/:id" element={<EditProductForm />} />
+                    <Route path="/products/details/:id" element={<ProductDetailsPage />} />
+                    <Route path="/products/history/:sku" element={<ProductHistoryPage />} />
+                    <Route path="/inventory" element={<InventoryPage />} />
+                    
+                    <Route path="/purchase" element={<PurchasePage />} />
+                    <Route path="/purchase/new" element={<NewPurchaseInvoiceForm />} />
+                    <Route path="/purchase/edit/:id" element={<EditPurchaseInvoiceForm />} />
+                    <Route path="/purchase/view/:id" element={<ViewPurchaseInvoicePage />} />
+                    <Route path="/purchase/receive" element={<StockReceivePage />} />
+                    <Route path="/purchase/finalize/:invoiceId" element={<FinalizePurchaseInvoice />} />
+                    <Route path="/purchase/pending-receivables" element={<PendingReceivablesPage />} />
+                    
+                    <Route path="/suppliers" element={<SuppliersPage />} />
+                    <Route path="/suppliers/new" element={<NewSupplierForm />} />
+                    <Route path="/suppliers/:id" element={<SupplierDetailsPage />} />
+                    <Route path="/suppliers/:id/edit" element={<EditSupplierForm />} />
 
-                                        <Route path="/sales" element={<SalesPage />} />
-                                        <Route path="/sales/new" element={<NewSalesOrderForm />} />
-                                        <Route path="/sales/edit/:id" element={<EditSalesOrderForm />} />
-                                        <Route path="/sales/view/:id" element={<ViewSalesOrderPage />} />
-                                        <Route path="/sales/stock-delivery" element={<StockDeliveryPage />} />
-                                        <Route path="/sales/finalize-order/:orderId" element={<FinalizeSalesOrder />} />
-                                        <Route path="/sales/pending-deliverables" element={<PendingDeliverablesPage />} />
+                    <Route path="/sales" element={<SalesPage />} />
+                    <Route path="/sales/new" element={<NewSalesOrderForm />} />
+                    <Route path="/sales/edit/:id" element={<EditSalesOrderForm />} />
+                    <Route path="/sales/view/:id" element={<ViewSalesOrderPage />} />
+                    <Route path="/sales/stock-delivery" element={<StockDeliveryPage />} />
+                    <Route path="/sales/finalize-order/:deliverableId" element={<FinalizeSalesOrder />} />
+                    <Route path="/sales/pending-deliverables" element={<PendingDeliverablesPage />} />
 
-                                        <Route path="/customers" element={<CustomersPage />} />
-                                        <Route path="/customers/new" element={<NewCustomerForm />} />
-                                        <Route path="/customers/:id" element={<CustomerDetailsPage />} />
-                                        
-                                        <Route path="/history" element={<HistoryPage />} />
-                                        <Route path="/settings" element={<SettingsPage />} />
-                                        <Route path="*" element={<div className="p-8 text-2xl text-red-500">404 Page Not Found</div>} />
-                                    </Routes>
-                                </main>
-                            </div>
-                        </LocationProvider>
-                    </PendingDeliverablesProvider>
-                </PendingReceivablesProvider>
-            </SalesOrderProvider>
-        </PurchaseInvoiceProvider>
+                    <Route path="/customers" element={<CustomersPage />} />
+                    <Route path="/customers/new" element={<NewCustomerForm />} />
+                    <Route path="/customers/:id" element={<CustomerDetailsPage />} />
+                    
+                    <Route path="/history" element={<HistoryPage />} />
+                    <Route path="/settings" element={<SettingsPage />} />
+                    <Route path="*" element={<div className="p-8 text-2xl text-red-500">404 Page Not Found</div>} />
+                </Routes>
+            </main>
+        </div>
     );
 };
 

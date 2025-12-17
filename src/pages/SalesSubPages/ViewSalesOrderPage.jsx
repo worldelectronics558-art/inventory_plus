@@ -83,6 +83,15 @@ const ViewSalesOrderPage = () => {
     
     const canBeEdited = order.status !== 'FINALIZED' && order.status !== 'CANCELLED';
 
+    // Helper to safely get a numeric value, supporting old and new data structures
+    const getItemValue = (item, newKey, oldKey) => {
+        if (item[newKey] !== undefined) return item[newKey];
+        if (item[oldKey] !== undefined) return item[oldKey];
+        return 0;
+    };
+
+    const GST_RATE = 0.18; // Assuming a constant rate for display calculation if needed
+
     return (
         <div className="page-container">
             <header className="page-header">
@@ -109,7 +118,7 @@ const ViewSalesOrderPage = () => {
             </header>
 
             <div className="page-content">
-                <div className="card max-w-4xl mx-auto">
+                <div className="card max-w-5xl mx-auto">
                     <div className="p-6 border-b">
                          <div className="grid grid-cols-2 md:grid-cols-3 gap-y-4 gap-x-8">
                              <div>
@@ -148,31 +157,60 @@ const ViewSalesOrderPage = () => {
                                         <th>Product</th>
                                         <th className="text-right">Ordered</th>
                                         <th className="text-right">Shipped</th>
-                                        <th className="text-right">Unit Price</th>
+                                        <th className="text-right">Unit Price (Inc. Tax)</th>
+                                        <th className="text-right">Pre-Tax Price</th>
+                                        <th className="text-right">Tax</th>
                                         <th className="text-right">Line Total</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {order.items && order.items.map((item, index) => (
-                                        <tr key={index}>
-                                            <td>
-                                                <div className="font-bold">{item.productName}</div>
-                                                <div className="text-sm opacity-70">SKU: {item.productId}</div>
-                                            </td>
-                                            <td className="text-right">{item.quantity}</td>
-                                            <td className="text-right font-semibold">{item.shippedQty || 0}</td>
-                                            <td className="text-right">Rs {item.unitPrice?.toFixed(2) || '0.00'}</td>
-                                            <td className="text-right font-bold">Rs {((item.quantity || 0) * (item.unitPrice || 0)).toFixed(2)}</td>
-                                        </tr>
-                                    ))}
+                                    {order.items && order.items.map((item, index) => {
+                                        const unitSalePrice = getItemValue(item, 'unitSalePrice', 'unitPrice');
+                                        const quantity = item.quantity || 0;
+                                        // For backward compatibility, calculate if new fields don't exist
+                                        const unitRetailPrice = getItemValue(item, 'unitRetailPrice', unitSalePrice / (1 + GST_RATE));
+                                        const unitSaleGST = getItemValue(item, 'unitSaleGST', unitRetailPrice * GST_RATE);
+                                        const lineTotal = unitSalePrice * quantity;
+
+                                        return (
+                                            <tr key={index}>
+                                                <td>
+                                                    <div className="font-bold">{item.productName}</div>
+                                                    <div className="text-sm opacity-70">SKU: {item.productId}</div>
+                                                </td>
+                                                <td className="text-right">{quantity}</td>
+                                                <td className="text-right font-semibold">{item.deliveredQty || 0}</td>
+                                                <td className="text-right">Rs {unitSalePrice.toFixed(2)}</td>
+                                                <td className="text-right">Rs {unitRetailPrice.toFixed(2)}</td>
+                                                <td className="text-right">Rs {unitSaleGST.toFixed(2)}</td>
+                                                <td className="text-right font-bold">Rs {lineTotal.toFixed(2)}</td>
+                                            </tr>
+                                        );
+                                    })}
                                 </tbody>
-                                <tfoot>
-                                    <tr>
-                                        <th colSpan="4" className="text-right text-lg">Total Amount</th>
-                                        <th className="text-right text-lg">Rs {order.totalAmount?.toFixed(2) || '0.00'}</th>
-                                    </tr>
-                                </tfoot>
                             </table>
+                        </div>
+                    </div>
+                    <div className="p-6 bg-gray-50 border-t rounded-b-lg">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            <div className="md:col-span-2">
+                                <h4 className="font-semibold text-gray-700">Notes</h4>
+                                <p className="text-gray-600 mt-1">{order.notes || 'No notes for this order.'}</p>
+                            </div>
+                            <div className="md:col-span-2 space-y-3">
+                                 <div className="flex justify-between items-center text-lg">
+                                    <span className="text-gray-600">Subtotal (Pre-Tax):</span>
+                                    <span className="font-semibold text-gray-800">Rs {(order.totalPreTax ?? 0).toFixed(2)}</span>
+                                </div>
+                                <div className="flex justify-between items-center text-lg">
+                                    <span className="text-gray-600">Total Tax:</span>
+                                    <span className="font-semibold text-gray-800">Rs {(order.totalTax ?? 0).toFixed(2)}</span>
+                                </div>
+                                <div className="flex justify-between items-center text-2xl border-t pt-3 mt-2">
+                                    <span className="font-bold">Total Amount:</span>
+                                    <span className="font-bold text-emerald-600">Rs {(order.totalAmount ?? 0).toFixed(2)}</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

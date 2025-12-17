@@ -1,4 +1,3 @@
-
 // src/main.jsx
 
 import React from 'react';
@@ -11,12 +10,14 @@ import { LoadingProvider } from './contexts/LoadingContext';
 import { UserProvider } from './contexts/UserContext.jsx';
 import { LookupProvider } from './contexts/LookupContext';
 import { ProductProvider } from './contexts/ProductContext.jsx';
-import { InventoryProvider } from './contexts/InventoryContext.jsx';
-import { SyncProvider } from './contexts/SyncContext.jsx';
 import { CustomerProvider } from './contexts/CustomerContext.jsx';
 import { PurchaseInvoiceProvider } from './contexts/PurchaseInvoiceContext.jsx';
 import { SalesOrderProvider } from './contexts/SalesOrderContext.jsx';
-import { SupplierProvider } from './contexts/SupplierContext.jsx'; // Import SupplierProvider
+import { SupplierProvider } from './contexts/SupplierContext.jsx';
+import { LocationProvider } from './contexts/LocationContext.jsx';
+import { PendingReceivablesProvider } from './contexts/PendingReceivablesContext.jsx';
+import { PendingDeliverablesProvider } from './contexts/PendingDeliverablesContext.jsx';
+
 
 // Correct Provider Nesting
 ReactDOM.createRoot(document.getElementById('root')).render(
@@ -25,23 +26,25 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       <BrowserRouter>
         <AuthProvider>
           <UserProvider>
-            <SyncProvider>
-              <LookupProvider>
-                <ProductProvider>
-                  <InventoryProvider>
-                    <SupplierProvider> {/* Add SupplierProvider */}
-                      <CustomerProvider>
+            <LookupProvider>
+              <ProductProvider>
+                <LocationProvider>
+                  <SupplierProvider>
+                    <CustomerProvider>
+                      <PendingReceivablesProvider>
                         <PurchaseInvoiceProvider>
                           <SalesOrderProvider>
-                            <App />
+                            <PendingDeliverablesProvider>
+                              <App />
+                            </PendingDeliverablesProvider>
                           </SalesOrderProvider>
                         </PurchaseInvoiceProvider>
-                      </CustomerProvider>
-                    </SupplierProvider>
-                  </InventoryProvider>
-                </ProductProvider>
-              </LookupProvider>
-            </SyncProvider>
+                      </PendingReceivablesProvider>
+                    </CustomerProvider>
+                  </SupplierProvider>
+                </LocationProvider>
+              </ProductProvider>
+            </LookupProvider>
           </UserProvider>
         </AuthProvider>
       </BrowserRouter>

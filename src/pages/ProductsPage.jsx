@@ -1,11 +1,9 @@
-
 // src/pages/ProductsPage.jsx
 
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProducts } from '../contexts/ProductContext';
 import { useLookups } from '../contexts/LookupContext';
-import { useInventory } from '../contexts/InventoryContext';
 
 // Responsive & UI Components
 import useMediaQuery from '../hooks/useMediaQuery';
@@ -17,8 +15,7 @@ import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 
 // AG Grid Imports
-import { AgGridReact } from 'ag-grid-react';
-import { themeQuartz } from 'ag-grid-community';
+import { AgGridReact } from 'ag-grid-react'; // React Data Grid Component
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community'; 
 
 // Register all Community features
@@ -162,7 +159,7 @@ const ProductsPage = () => {
   const navigate = useNavigate();
   const { products, isLoading, deleteProduct, isOnline } = useProducts();
   const { lookups } = useLookups();
-  const { stockLevels } = useInventory();
+
   const [searchText, setSearchText] = useState('');
   const [activeFilters, setActiveFilters] = useState([]);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
@@ -179,11 +176,13 @@ const ProductsPage = () => {
   }, [isMutationDisabled, deleteProduct]);
 
   const productsWithStock = useMemo(() => {
+    // The 'products' from useProducts now includes a 'stockSummary' object.
+    // We just need to use 'inStock' as 'totalStock' for this component's use.
     return products.map(p => ({
         ...p,
-        totalStock: (stockLevels[p.sku] ? Object.values(stockLevels[p.sku]).reduce((sum, val) => sum + val, 0) : 0)
+        totalStock: p.stockSummary?.inStock || 0
     }));
-  }, [products, stockLevels]);
+  }, [products]);
 
   const filteredProducts = useMemo(() => {
     let currentProducts = productsWithStock;
@@ -220,7 +219,7 @@ const ProductsPage = () => {
         <button onClick={() => handleDeleteProduct(product.id, product.sku)} className={`text-red-600 hover:text-red-900 p-1 ${isMutationDisabled ? disabledClass : ''}`} disabled={isMutationDisabled} title="Delete Product"><DeleteIcon className="w-5 h-5" /></button>
       </div>
     );
-  }, [isOnline, navigate, handleDeleteProduct]);
+  }, [isMutationDisabled, navigate, handleDeleteProduct]);
 
   const columnDefs = useMemo(() => ([
     { field: 'sku', headerName: 'SKU', minWidth: 120, filter: true },
@@ -254,59 +253,74 @@ const ProductsPage = () => {
   if (isLoading) return <div className="text-xl text-center">Loading Products...</div>;
 
   return (
-    <div>
-      <h1 className="page-title">Product Management</h1>
-      <div className="flex flex-wrap gap-2 mb-6">
-        <button onClick={() => navigate('/products/add')} className="btn btn-primary" disabled={isMutationDisabled}>Add Product</button>
-        <button onClick={() => navigate('/products/bulk-import')} className="btn btn-secondary" disabled={isMutationDisabled}>Bulk Import</button>
-        <div className="relative inline-block text-left">
-          <button type="button" className="btn btn-secondary" onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}>Export</button>
-          {isExportMenuOpen && (
-            <div className="absolute right-0 mt-1 w-48 z-10 py-1 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5">
-              <button onClick={() => exportTo('pdf')} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">As PDF</button>
-              <button onClick={() => exportTo('excel')} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">As Excel</button>
-            </div>
-          )}
-        </div>
-      </div>
-      <div className="mb-6 card">
-        <OdooSearchBar lookups={lookups} searchText={searchText} setSearchText={setSearchText} activeFilters={activeFilters} onFilterToggle={(f) => setActiveFilters(p => p.some(pf => pf.key === f.key && pf.value === f.value) ? p.filter(pf => !(pf.key === f.key && pf.value === f.value)) : [...p, f])} onFilterRemove={(f) => setActiveFilters(p => p.filter(pf => !(pf.key === f.key && pf.value === f.value)))} categorizedFilterOptions={categorizedFilterOptions} />
-      </div>
-
-      {filteredProducts.length === 0 ? (
-          <div className="card text-center p-6">
-              <p className="text-gray-500">No products found that match your criteria.</p>
-              {products.length === 0 && (
-                   <button onClick={() => navigate('/products/add')} className="btn btn-primary mt-4" disabled={isMutationDisabled}>Add Your First Product</button>
+    <div className="page-container">
+      <header className="page-header">
+        <h1 className="page-title">Product Management</h1>
+        <div className="page-actions">
+            <button onClick={() => navigate('/products/add')} className="btn btn-primary" disabled={isMutationDisabled}>Add Product</button>
+            <button onClick={() => navigate('/products/bulk-import')} className="btn btn-secondary" disabled={isMutationDisabled}>Bulk Import</button>
+            <div className="relative inline-block text-left">
+              <button type="button" className="btn btn-secondary" onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}>Export</button>
+              {isExportMenuOpen && (
+                <div className="absolute right-0 mt-1 w-48 z-10 py-1 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5">
+                  <button onClick={() => exportTo('pdf')} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">As PDF</button>
+                  <button onClick={() => exportTo('excel')} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">As Excel</button>
+                </div>
               )}
-          </div>
-      ) : isMobile ? (
-          <div>
-              {filteredProducts.map(product => (
-                  <ProductCard 
-                    key={product.id} 
-                    product={product} 
-                    onDelete={handleDeleteProduct}
-                    isMutationDisabled={isMutationDisabled}
-                  />
-              ))}
-          </div>
-      ) : (
-          <div className="bg-white shadow overflow-hidden rounded-lg">
-            <div className="ag-theme-indigo" style={{ width: '100%', height: 600 }}>
+            </div>
+        </div>
+      </header>
+      
+      <div className="page-content">
+        <div className="mb-6 card p-4">
+            <OdooSearchBar 
+                lookups={lookups} 
+                searchText={searchText} 
+                setSearchText={setSearchText} 
+                activeFilters={activeFilters} 
+                onFilterToggle={(f) => setActiveFilters(p => p.some(pf => pf.key === f.key && pf.value === f.value) ? p.filter(pf => !(pf.key === f.key && pf.value === f.value)) : [...p, f])} 
+                onFilterRemove={(f) => setActiveFilters(p => p.filter(pf => !(pf.key === f.key && pf.value === f.value)))} 
+                categorizedFilterOptions={categorizedFilterOptions} 
+            />
+        </div>
+
+        {filteredProducts.length === 0 ? (
+            <div className="card text-center p-6">
+                <p className="text-gray-500">No products found that match your criteria.</p>
+                {products.length === 0 && (
+                     <button onClick={() => navigate('/products/add')} className="btn btn-primary mt-4" disabled={isMutationDisabled}>Add Your First Product</button>
+                )}
+            </div>
+        ) : isMobile ? (
+            <div className="space-y-4">
+                {filteredProducts.map(product => (
+                    <ProductCard 
+                      key={product.id} 
+                      product={product} 
+                      onDelete={handleDeleteProduct}
+                      isMutationDisabled={isMutationDisabled}
+                    />
+                ))}
+            </div>
+        ) : (
+            <div className="ag-theme-indigo" style={{ width: '100%', height: '65vh' }}>
                 <AgGridReact
-                    theme={themeQuartz}
                     rowData={filteredProducts}
                     columnDefs={columnDefs}
                     defaultColDef={defaultColDef}
                     pagination={true}
-                    paginationPageSize={25}
-                    paginationPageSizeSelector={[10, 25, 50, 100]}
-                    rowSelection={{ mode: 'singleRow' }}
+                    paginationPageSize={100}
+                    paginationPageSizeSelector={[25, 50, 100, 200]}
+                    rowSelection={'single'}
+                    onCellClicked={(params) => {
+                        // Check if the click was not on an action button before navigating
+                        if (params.event.target.closest('.flex.justify-end')) return;
+                        navigate(`/products/details/${params.data.id}`);
+                    }}
                 />
             </div>
-          </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };

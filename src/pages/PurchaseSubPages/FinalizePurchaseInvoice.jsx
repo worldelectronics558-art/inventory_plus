@@ -1,277 +1,318 @@
 
 // src/pages/PurchaseSubPages/FinalizePurchaseInvoice.jsx
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
+import { doc, runTransaction, collection, serverTimestamp } from 'firebase/firestore';
 
 // --- Contexts ---
+import { useAuth } from '../../contexts/AuthContext';
+import { useUser } from '../../contexts/UserContext';
 import { usePurchaseInvoices } from '../../contexts/PurchaseInvoiceContext';
 import { usePendingReceivables } from '../../contexts/PendingReceivablesContext';
 import { useProducts } from '../../contexts/ProductContext';
 import { useLocations } from '../../contexts/LocationContext';
 import { useLoading } from '../../contexts/LoadingContext';
-import { useUser } from '../../contexts/UserContext';
-import { useAuth } from '../../contexts/AuthContext.jsx';
-import { useSync } from '../../contexts/SyncContext.jsx';
 
 // --- Utils & Components ---
 import { getProductDisplayName } from '../../utils/productUtils';
-import { ArrowLeft, Edit, Link2, AlertTriangle, Package, ChevronDown, CheckSquare, Square } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, Package, ChevronDown, CheckSquare, Square, MinusCircle, PlusCircle, PackageCheck } from 'lucide-react';
 import LoadingSpinner from '../../components/LoadingOverlay';
 
 const statusStyles = {
     PENDING: 'bg-yellow-100 text-yellow-700',
     'PARTIALLY RECEIVED': 'bg-blue-100 text-blue-700',
     FINALIZED: 'bg-green-100 text-green-700',
-    CANCELLED: 'bg-red-100',
+    'ARCHIVED': 'bg-gray-100 text-gray-500'
 };
 
 const FinalizePurchaseInvoice = () => {
     const { invoiceId } = useParams();
     const navigate = useNavigate();
 
-    // --- Data from Contexts ---
-    const { invoices, isLoading: invoicesLoading } = usePurchaseInvoices();
+    // --- Hooks ---
+    const { db, appId, userId, authReady } = useAuth();
+    const { currentUser, isLoading: userLoading } = useUser();
+    const { invoices, isLoading: invoicesLoading, setMutationDisabled, isMutationDisabled } = usePurchaseInvoices();
     const { pendingReceivables, isLoading: receivablesLoading } = usePendingReceivables();
     const { products, isLoading: productsLoading } = useProducts();
     const { locations, isLoading: locationsLoading } = useLocations();
     const { setAppProcessing } = useLoading();
-    const { currentUser, isLoading: userLoading } = useUser();
-    const { userId } = useAuth();
-    const { addToQueue } = useSync();
 
-    // --- Local State ---
-    const [invoice, setInvoice] = useState(null);
+    // --- State ---
     const [selectedStock, setSelectedStock] = useState({});
     const [openBatches, setOpenBatches] = useState(new Set());
+    const [error, setError] = useState('');
 
-    const isLoading = invoicesLoading || receivablesLoading || productsLoading || locationsLoading || userLoading;
-
-    const productMap = useMemo(() => products.reduce((acc, p) => ({ ...acc, [p.id]: p }), {}), [products]);
+    // --- Memoized Data for UI Display ---
+    const isLoading = !authReady || userLoading || invoicesLoading || receivablesLoading || productsLoading || locationsLoading;
+    const invoiceForDisplay = useMemo(() => invoices.find(i => i.id === invoiceId), [invoiceId, invoices]);
+    const productMap = useMemo(() => products.reduce((acc, p) => ({ ...acc, [p.id]: p, [p.sku]: p }), {}), [products]);
     const locationMap = useMemo(() => locations.reduce((acc, loc) => ({ ...acc, [loc.id]: loc.name }), {}), [locations]);
 
-    useEffect(() => {
-        if (!isLoading) {
-            const inv = invoices.find(i => i.id === invoiceId);
-            if (inv) {
-                const initializedItems = (inv.items || []).map(item => ({...item, receivedQty: item.receivedQty || 0 }));
-                setInvoice({ ...inv, items: initializedItems });
-            }
+    // --- Main Transaction Logic --- 
+    const handleFinalizeInvoice = useCallback(async () => {
+        setError('');
+        const selectedUnits = Object.values(selectedStock).map(sel => ({ ...sel.item, quantity: sel.quantity }));
+
+        if (selectedUnits.length === 0) {
+            setError('No items have been selected to add to stock.');
+            return;
         }
-    }, [invoiceId, invoices, isLoading]);
-
-    const relevantBatches = useMemo(() => {
-        if (isLoading || !invoice) return {};
-        const invoiceSkus = new Set(invoice.items.map(item => item.productId));
-        const relevantReceivables = pendingReceivables.filter(pr => invoiceSkus.has(pr.sku));
-        
-        const grouped = relevantReceivables.reduce((acc, receivable) => {
-            const batchId = receivable.batchId || `nobatch_${receivable.id}`;
-            if (!acc[batchId]) {
-                acc[batchId] = {
-                    items: [],
-                    receivedBy: receivable.createdBy?.name || 'N/A',
-                    receivedAt: receivable.createdAt?.toDate ? receivable.createdAt.toDate().toLocaleDateString() : 'N/A',
-                };
-            }
-
-            const productInfo = productMap[receivable.productId] || {};
-            const commonItemData = {
-                ...receivable,
-                productName: getProductDisplayName(productInfo),
-                locationName: locationMap[receivable.locationId] || 'N/A',
-                originalReceivableId: receivable.id,
-            };
-
-            if (receivable.isSerialized && receivable.serials?.length > 0) {
-                receivable.serials.forEach(serial => {
-                    acc[batchId].items.push({
-                        ...commonItemData,
-                        id: `${receivable.id}-${serial}`,
-                        quantity: 1,
-                        serial: serial, 
-                    });
-                });
-            } else {
-                 acc[batchId].items.push({
-                    ...commonItemData,
-                    id: receivable.id,
-                });
-            }
-            return acc;
-        }, {});
-
-        return Object.keys(grouped).sort().reverse().reduce((obj, key) => { 
-            obj[key] = grouped[key]; 
-            return obj; 
-        }, {});
-    }, [isLoading, invoice, pendingReceivables, productMap, locationMap]);
-
-    useEffect(() => {
-        const firstBatchKey = Object.keys(relevantBatches)[0];
-        if (firstBatchKey) {
-            setOpenBatches(new Set([firstBatchKey]));
+        if (!db || !appId || !userId) {
+            setError('Critical data is missing (DB, App, or User). Please refresh and try again.');
+            return;
         }
-    }, [relevantBatches]);
 
-    const fulfillmentSummary = useMemo(() => {
-        const summary = {};
-        if (!invoice) return summary;
-        invoice.items.forEach(item => {
-            summary[item.productId] = { needed: item.quantity - (item.receivedQty || 0), selected: 0 };
-        });
-
-        Object.values(selectedStock).forEach(selectedItem => {
-            if (summary[selectedItem.sku]) {
-                summary[selectedItem.sku].selected += selectedItem.quantity;
-            }
-        });
-        return summary;
-    }, [selectedStock, invoice]);
-
-    const isItemDisabled = useCallback((item) => {
-        const summary = fulfillmentSummary[item.sku];
-        if (!summary) return true;
-        const isSelected = !!selectedStock[item.id];
-        return !isSelected && summary.selected >= summary.needed;
-    }, [fulfillmentSummary, selectedStock]);
-
-    const handleSelectionChange = useCallback((item) => {
-        if (isItemDisabled(item) && !selectedStock[item.id]) return;
-        setSelectedStock(prev => {
-            const newSelection = { ...prev };
-            if (newSelection[item.id]) {
-                delete newSelection[item.id];
-            } else {
-                newSelection[item.id] = item;
-            }
-            return newSelection;
-        });
-    }, [isItemDisabled, selectedStock]);
-
-    const handleBatchSelectionChange = useCallback((batch) => {
-        const selectableItems = batch.items.filter(item => !isItemDisabled(item) || selectedStock[item.id]);
-        const areAllSelected = selectableItems.every(item => selectedStock[item.id]);
-
-        setSelectedStock(prev => {
-            const newSelection = { ...prev };
-            selectableItems.forEach(item => {
-                if (areAllSelected) {
-                    delete newSelection[item.id];
-                } else {
-                    const summary = fulfillmentSummary[item.sku];
-                    if (summary && (summary.selected < summary.needed || selectedStock[item.id])) {
-                         newSelection[item.id] = item;
-                    }
-                }
-            });
-            return newSelection;
-        });
-    }, [isItemDisabled, selectedStock, fulfillmentSummary]);
-
-    const handleAttachItems = async () => {
-        const selectedItems = Object.values(selectedStock);
-        if (selectedItems.length === 0) return alert('No items selected.');
-        if (!userId || !currentUser) return alert("Authentication error: User not found. Please log in again.");
-
-        setAppProcessing(true, 'Queuing stock finalization...');
-
-        // Prepare updated invoice data
-        const updatedInvoiceItems = JSON.parse(JSON.stringify(invoice.items));
-        selectedItems.forEach(item => {
-            const invoiceItem = updatedInvoiceItems.find(invItem => invItem.productId === item.sku);
-            if (invoiceItem) {
-                invoiceItem.receivedQty = (invoiceItem.receivedQty || 0) + item.quantity;
-            }
-        });
-
-        const isFullyReceived = updatedInvoiceItems.every(item => item.receivedQty >= item.quantity);
-        const newStatus = isFullyReceived ? 'FINALIZED' : 'PARTIALLY RECEIVED';
-        
-        const updatedInvoiceData = {
-            items: updatedInvoiceItems,
-            status: newStatus
-        };
-
-        // Prepare IDs of pending receivables to be deleted
-        const pendingReceivableIds = [...new Set(selectedItems.map(item => item.originalReceivableId))];
-
-        // Prepare items to be added to main inventory
-        const itemsToStockIn = selectedItems.map(item => {
-            const { id, originalReceivableId, productName, locationName, ...restOfItem } = item;
-            return {
-                ...restOfItem,
-                cost: item.cost || 0,
-                receivedBy: item.createdBy,
-                authorizedBy: { uid: userId, name: currentUser.displayName || 'N/A' },
-            };
-        });
+        setAppProcessing(true, 'Authorizing stock...');
+        setMutationDisabled(true);
 
         try {
-            // Queue the actions
-            await addToQueue('EXECUTE_STOCK_IN', itemsToStockIn, currentUser);
-            await addToQueue('FINALIZE_PURCHASE_INVOICE', {
-                invoiceId: invoice.id,
-                updatedInvoiceData,
-                pendingReceivableIds,
-            }, currentUser);
+            await runTransaction(db, async (transaction) => {
+                const invoiceRef = doc(db, `artifacts/${appId}/purchase_invoices`, invoiceId);
+                const productsCollectionRef = collection(db, `artifacts/${appId}/products`);
+                const receivablesCollectionRef = collection(db, `artifacts/${appId}/pending_receivables`);
+                const historyCollectionRef = collection(db, `artifacts/${appId}/item_history`);
 
-            alert(`Invoice update has been queued! Status will be: ${newStatus}`);
+                // --- PHASE 1: READS --- 
+                const invoiceDoc = await transaction.get(invoiceRef);
+                if (!invoiceDoc.exists()) throw new Error("Invoice not found. It may have been deleted.");
+
+                const productIds = [...new Set(selectedUnits.map(u => u.productId))];
+                const receivableIds = [...new Set(selectedUnits.map(u => u.originalReceivableId))];
+
+                const productDocsPromise = productIds.map(id => transaction.get(doc(productsCollectionRef, id)));
+                const receivableDocsPromise = receivableIds.map(id => transaction.get(doc(receivablesCollectionRef, id)));
+                
+                const [productDocs, receivableDocs] = await Promise.all([Promise.all(productDocsPromise), Promise.all(receivableDocsPromise)]);
+
+                const productsData = productDocs.reduce((acc, doc) => {
+                    if(doc.exists()) acc[doc.id] = doc.data();
+                    return acc;
+                }, {});
+                
+                const receivablesData = receivableDocs.reduce((acc, doc) => {
+                    if(doc.exists()) acc[doc.id] = doc.data();
+                    return acc;
+                }, {});
+
+                // --- PHASE 2: PROCESS & PREPARE WRITES ---
+                const currentInvoiceData = invoiceDoc.data();
+                const newInvoiceItems = JSON.parse(JSON.stringify(currentInvoiceData.items));
+
+                const writes = []; // Combined array for all writes
+                const stockSummaryUpdates = new Map();
+                const receivableUpdates = new Map();
+
+                for (const unit of selectedUnits) {
+                    const invoiceItem = newInvoiceItems.find(i => i.productId === unit.sku);
+                    if (!invoiceItem) throw new Error(`SKU ${unit.sku} not found in this invoice.`);
+
+                    if (!productsData[unit.productId]) throw new Error(`Product data for ${unit.productId} could not be read.`);
+                    
+                    const receivableData = receivablesData[unit.originalReceivableId];
+                    if (!receivableData) throw new Error(`Pending receivable doc ${unit.originalReceivableId} not found.`);
+
+                    const inventoryItemRef = doc(collection(db, `artifacts/${appId}/inventory_items`));
+                    
+                    // Prepare inventory item creation
+                    writes.push({ 
+                        type: 'set', 
+                        ref: inventoryItemRef,
+                        data: {
+                            sku: unit.sku, productId: unit.productId, productName: unit.productName, isSerialized: unit.isSerialized, 
+                            serial: unit.serial || null, quantity: unit.quantity, status: 'in_stock', locationId: unit.locationId,
+                            unitCostPrice: invoiceItem.unitCostPrice, invoiceId: invoiceId, invoiceNumber: currentInvoiceData.invoiceNumber,
+                            supplierName: currentInvoiceData.supplierName, 
+                            receivedAt: unit.createdAt, 
+                            receivedBy: receivableData.createdBy, // *** ADDED ***
+                            authorizedAt: serverTimestamp(), // *** RENAMED ***
+                            authorizedBy: { uid: userId, name: currentUser?.displayName || 'N/A' }, // *** RENAMED ***
+                            ownerId: appId,
+                        } 
+                    });
+
+                    // Prepare history log creation
+                    writes.push({ 
+                        type: 'set',
+                        ref: doc(historyCollectionRef), 
+                        data: {
+                            type: "STOCK_AUTHORIZED",
+                            timestamp: serverTimestamp(),
+                            user: { uid: userId, name: currentUser?.displayName || 'N/A' },
+                            inventoryItemId: inventoryItemRef.id,
+                            productId: unit.productId,
+                            sku: unit.sku,
+                            serial: unit.serial || null,
+                            quantity: unit.quantity,
+                            locationId: unit.locationId,
+                            context: {
+                                type: "PURCHASE_INVOICE",
+                                documentId: invoiceId,
+                                documentNumber: currentInvoiceData.invoiceNumber,
+                                supplierName: currentInvoiceData.supplierName,
+                                receivedBy: receivableData.createdBy,
+                            }
+                        }
+                    });
+                    
+                    // Aggregate updates for pending receivables
+                    if (!receivableUpdates.has(unit.originalReceivableId)) {
+                        receivableUpdates.set(unit.originalReceivableId, { doc: receivableData, takenQty: 0, takenSerials: new Set() });
+                    }
+                    const recUpdate = receivableUpdates.get(unit.originalReceivableId);
+                    if (unit.isSerialized) { recUpdate.takenSerials.add(unit.serial); } else { recUpdate.takenQty += unit.quantity; }
+                    
+                    // Aggregate updates for product stock summaries
+                    if (!stockSummaryUpdates.has(unit.productId)) {
+                         stockSummaryUpdates.set(unit.productId, { doc: productsData[unit.productId], qtyChange: 0, locationChanges: new Map() });
+                    }
+                    const stockUpdate = stockSummaryUpdates.get(unit.productId);
+                    stockUpdate.qtyChange += unit.quantity;
+                    stockUpdate.locationChanges.set(unit.locationId, (stockUpdate.locationChanges.get(unit.locationId) || 0) + unit.quantity);
+
+                    invoiceItem.receivedQty = (invoiceItem.receivedQty || 0) + unit.quantity;
+                }
+
+                // --- PHASE 3: WRITES --- 
+                writes.forEach(op => transaction.set(op.ref, op.data));
+
+                for (const [id, update] of receivableUpdates.entries()) {
+                    const receivableRef = doc(receivablesCollectionRef, id);
+                    if (update.doc.isSerialized) {
+                        const remainingSerials = update.doc.serials.filter(s => !update.takenSerials.has(s));
+                        if (remainingSerials.length > 0) { transaction.update(receivableRef, { serials: remainingSerials, quantity: remainingSerials.length }); } else { transaction.delete(receivableRef); }
+                    } else {
+                        const remainingQty = update.doc.quantity - update.takenQty;
+                        if (remainingQty > 0) { transaction.update(receivableRef, { quantity: remainingQty }); } else { transaction.delete(receivableRef); }
+                    }
+                }
+                
+                for (const [productId, update] of stockSummaryUpdates.entries()) {
+                    const productRef = doc(productsCollectionRef, productId);
+                    const newSummary = update.doc.stockSummary || { totalInStock: 0, byLocation: {} };
+                    newSummary.totalInStock = (newSummary.totalInStock || 0) + update.qtyChange;
+                    for(const [locId, qty] of update.locationChanges.entries()){
+                       newSummary.byLocation[locId] = (newSummary.byLocation[locId] || 0) + qty;
+                    }
+                    transaction.update(productRef, { stockSummary: newSummary });
+                }
+
+                const isFullyReceived = newInvoiceItems.every(item => item.receivedQty >= item.quantity);
+                transaction.update(invoiceRef, {
+                    items: newInvoiceItems, status: isFullyReceived ? 'FINALIZED' : 'PARTIALLY RECEIVED',
+                    lastUpdatedAt: serverTimestamp(), lastUpdatedBy: { uid: userId, name: currentUser?.displayName || 'N/A' },
+                });
+            });
+
+            alert('Stock authorized and added to inventory successfully!');
             navigate('/purchase');
 
         } catch (error) {
-            console.error("Failed to queue finalization tasks:", error);
-            alert(`An error occurred while queueing the tasks: ${error.message}`);
+            console.error("A critical error occurred during finalization:", error);
+            setError(`Error: ${error.message}`);
         } finally {
             setAppProcessing(false);
+            setMutationDisabled(false);
         }
+    }, [db, appId, userId, currentUser, invoiceId, selectedStock, navigate, setAppProcessing, setMutationDisabled, setError]);
+    
+    const relevantBatches = useMemo(() => {
+        if (!invoiceForDisplay || !pendingReceivables) return {};
+        const invoiceSkus = new Set(invoiceForDisplay.items.map(item => item.productId));
+        const relevantPRs = pendingReceivables.filter(pr => invoiceSkus.has(pr.sku) && (pr.quantity > 0 || pr.serials?.length > 0));
+        const grouped = relevantPRs.reduce((acc, pr) => {
+            const batchId = pr.batchId || `direct_${pr.id}`;
+            if (!acc[batchId]) {
+                acc[batchId] = { items: [], receivedBy: pr.createdBy?.name || 'N/A', receivedAt: pr.createdAt?.toDate ? pr.createdAt.toDate().toLocaleDateString() : 'N/A' };
+            }
+            const productInfo = productMap[pr.productId] || {};
+            const commonData = { ...pr, productName: getProductDisplayName(productInfo), locationName: locationMap[pr.locationId] || 'Unknown Location', originalReceivableId: pr.id };
+            if (pr.isSerialized) { pr.serials.forEach(serial => { acc[batchId].items.push({ ...commonData, id: `${pr.id}-${serial}`, quantity: 1, serial: serial }); });
+            } else { acc[batchId].items.push({ ...commonData, id: pr.id }); }
+            return acc;
+        }, {});
+        return Object.keys(grouped).sort().reverse().reduce((obj, key) => ({...obj, [key]: grouped[key]}), {});
+    }, [invoiceForDisplay, pendingReceivables, productMap, locationMap]);
+
+    useEffect(() => {
+        const keys = Object.keys(relevantBatches);
+        if (keys.length > 0 && openBatches.size === 0) { setOpenBatches(new Set([keys[0]])); }
+    }, [relevantBatches, openBatches]);
+
+    const fulfillmentSummary = useMemo(() => {
+        const summary = {};
+        if (!invoiceForDisplay) return summary;
+        invoiceForDisplay.items.forEach(item => { summary[item.productId] = { needed: item.quantity - (item.receivedQty || 0), selected: 0 }; });
+        Object.values(selectedStock).forEach(sel => {
+            if (summary[sel.item.sku]) { summary[sel.item.sku].selected += sel.quantity; }
+        });
+        return summary;
+    }, [selectedStock, invoiceForDisplay]);
+
+    const handleQuantityChange = (item, qty) => {
+        const summary = fulfillmentSummary[item.sku];
+        if (!summary) return;
+        const currentSelection = selectedStock[item.id]?.quantity || 0;
+        const maxSelectable = summary.needed - (summary.selected - currentSelection);
+        const newQty = Math.max(0, Math.min(qty, item.quantity, maxSelectable));
+        setSelectedStock(prev => {
+            const next = { ...prev };
+            if (newQty > 0) { next[item.id] = { item, quantity: newQty }; } else { delete next[item.id]; }
+            return next;
+        });
+    };
+    
+    const toggleBatch = (batchId) => {
+        setOpenBatches(prev => {
+            const next = new Set(prev);
+            if (next.has(batchId)) { next.delete(batchId); } else { next.add(batchId); }
+            return next;
+        });
     };
 
-    if (isLoading || !invoice) {
-        return <LoadingSpinner>Loading invoice and stock details...</LoadingSpinner>;
-    }
-
-    const totalSelectedCount = Object.keys(selectedStock).length;
+    if (isLoading) return <LoadingSpinner>Loading Invoice Details...</LoadingSpinner>;
+    if (!invoiceForDisplay) return <div className="page-container"><p>Invoice not found.</p></div>
 
     return (
         <div className="page-container bg-gray-50">
              <header className="page-header">
                  <div>
-                    <Link to="/purchase" className="flex items-center text-sm font-medium text-gray-500 hover:text-gray-700 mb-1"><ArrowLeft size={16} className="mr-1" /> Back to Purchases</Link>
-                    <h1 className="page-title">Attach Stock to Invoice</h1>
+                    <Link to="/purchase" className="flex items-center text-sm font-medium text-gray-500 hover:text-gray-700 mb-1"><ArrowLeft size={16} className="mr-1" /> Back to Invoices</Link>
+                    <h1 className="page-title">Authorize Received Stock</h1>
                 </div>
                 <div className="page-actions">
-                    <Link to={`/purchase/edit/${invoiceId}`} className="btn btn-secondary mr-2"><Edit size={16} className="mr-2"/> Edit Invoice</Link>
-                    <button onClick={handleAttachItems} className="btn btn-primary" disabled={!userId || invoice.status === 'FINALIZED' || totalSelectedCount === 0}>
-                        <Link2 size={18} className="mr-2" /> Attach {totalSelectedCount} Line(s)
+                    <button onClick={handleFinalizeInvoice} className="btn btn-primary" disabled={isMutationDisabled || Object.keys(selectedStock).length === 0}>
+                        <PackageCheck size={18} className="mr-2" /> Confirm & Authorize Stock
                     </button>
                 </div>
             </header>
             <div className="page-content md:grid md:grid-cols-2 lg:grid-cols-5 gap-6">
                 <div className="lg:col-span-2">
-                    <div className="card sticky top-20 shadow-lg p-4">
+                     <div className="card sticky top-20 bg-white shadow p-4 border">
                         <div className="flex justify-between items-center mb-3">
-                            <h2 className="text-lg font-bold text-gray-800 truncate" title={invoice.invoiceNumber}>{invoice.invoiceNumber}</h2>
-                            <span className={`px-3 py-1 text-sm font-semibold rounded-full ${statusStyles[invoice.status] || 'bg-gray-100'}`}>{invoice.status}</span>
+                            <h2 className="text-lg font-bold text-gray-800 truncate" title={invoiceForDisplay.invoiceNumber}>{invoiceForDisplay.invoiceNumber}</h2>
+                            <span className={`px-3 py-1 text-sm font-semibold rounded-full ${statusStyles[invoiceForDisplay.status] || 'bg-gray-100'}`}>{invoiceForDisplay.status}</span>
                         </div>
-                        <p className="text-sm text-gray-600 mb-4"><strong>Supplier:</strong> {invoice.supplierName || 'N/A'}</p>
-                        <div className="divider my-1">Invoice Fulfillment</div>
+                        <p className="text-sm text-gray-600 mb-4"><strong>Supplier:</strong> {invoiceForDisplay.supplierName || 'N/A'}</p>
+                        {error && <div className="alert alert-error text-sm p-2 mb-4"><span>{error}</span></div>}
+                        <div className="divider my-1">Fulfillment Progress</div>
                         <ul className="space-y-3 my-4">
-                            {invoice.items.map(item => {
-                                const productInfo = products.find(p => p.sku === item.productId);
-                                if (!productInfo) return null;
-                                const summary = fulfillmentSummary[item.productId] || { needed: item.quantity, selected: 0 };
-                                const received = (item.receivedQty || 0);
+                            {invoiceForDisplay.items.map(item => {
+                                const summary = fulfillmentSummary[item.productId] || { needed: 0, selected: 0 };
+                                const received = item.receivedQty || 0;
                                 const finalQty = received + summary.selected;
+                                const total = item.quantity;
                                 return(
                                 <li key={item.productId}>
-                                    <p className="font-semibold text-gray-700 truncate">{getProductDisplayName(productInfo)}</p>
+                                    <p className="font-semibold text-gray-700 truncate" title={productMap[item.productId]?.name || item.productName}>{productMap[item.productId]?.name || item.productName}</p>
                                     <div className="flex items-center justify-between text-sm">
-                                        <p className="text-gray-500">Needed: {summary.needed - summary.selected < 0 ? 0 : summary.needed - summary.selected}</p>
-                                        <p className="font-bold text-gray-800">{finalQty} / {item.quantity}</p>
+                                        <p className="text-gray-500">Remaining: {Math.max(0, summary.needed - summary.selected)}</p>
+                                        <p className="font-bold text-gray-800">{finalQty} / {total}</p>
                                     </div>
                                     <div className="w-full bg-gray-200 rounded-full h-3 mt-1 relative overflow-hidden">
-                                        <div className="bg-green-500 h-3" style={{ width: `${(received / item.quantity) * 100}%` }}></div>
-                                        <div className="bg-blue-300 h-3 absolute top-0" style={{ left: `${(received / item.quantity) * 100}%`, width: `${(summary.selected / item.quantity) * 100}%`}}></div>
+                                        <div className="bg-green-500 h-3" style={{ width: `${(received / total) * 100}%` }}></div>
+                                        <div className="bg-blue-400 h-3 absolute top-0" style={{ left: `${(received / total) * 100}%`, width: `${(summary.selected / total) * 100}%`}}></div>
                                     </div>
                                 </li>
                             )})}
@@ -279,52 +320,61 @@ const FinalizePurchaseInvoice = () => {
                     </div>
                 </div>
                 <div className="lg:col-span-3 mt-6 md:mt-0">
-                    <div className="card p-4">
-                        <h2 className="card-title mb-4">Select Pending Stock to Attach</h2>
+                    <div className="card bg-white p-4 border">
+                        <h2 className="card-title mb-4">Select from Pending Received Stock</h2>
                         {Object.keys(relevantBatches).length === 0 ? (
-                            <div className="text-center text-gray-500 py-8"><AlertTriangle size={20} className="mx-auto text-yellow-500 mb-2" /> No matching pending stock found for this invoice.</div>
+                            <div className="text-center text-gray-500 py-8 flex flex-col items-center">
+                                <AlertTriangle size={24} className="text-yellow-500 mb-2" />
+                                <p className="font-semibold">No Matching Stock Found</p>
+                                <p className="text-sm">There are no pending received items that match this purchase invoice.</p>
+                            </div>
                         ) : (
                             <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-2">
                                 {Object.entries(relevantBatches).map(([batchId, batch]) => {
-                                    const isBatchOpen = openBatches.has(batchId);
-                                    const selectableInBatch = batch.items.filter(i => !isItemDisabled(i) || selectedStock[i.id]);
-                                    const selectedInBatchCount = batch.items.filter(i => selectedStock[i.id]).length;
-                                    const isAllSelected = selectableInBatch.length > 0 && selectedInBatchCount === selectableInBatch.length;
-                                    
+                                    const isOpen = openBatches.has(batchId);
                                     return (
                                     <div key={batchId} className="border rounded-lg bg-white shadow-sm">
-                                        <header onClick={() => setOpenBatches(prev => { const newSet = new Set(prev); if(newSet.has(batchId)) newSet.delete(batchId); else newSet.add(batchId); return newSet; })} className="p-3 flex justify-between items-center cursor-pointer border-b bg-gray-50 hover:bg-gray-100 rounded-t-lg">
-                                            <div className="flex items-center flex-grow min-w-0">
-                                                 <div onClick={e => {e.stopPropagation(); handleBatchSelectionChange(batch);}} className="mr-4 p-1">
-                                                    {isAllSelected ? <CheckSquare className="text-blue-600"/> : (selectedInBatchCount > 0 ? <div className="w-4 h-4 border-2 border-blue-500 bg-blue-200 rounded-sm"/> : <Square className="text-gray-400"/>)}
-                                                </div>
-                                                <div className="flex flex-col min-w-0">
-                                                    <span className="font-bold text-gray-800 truncate">{batchId}</span>
-                                                    <span className="text-xs text-gray-500 truncate">Received by {batch.receivedBy} on {batch.receivedAt}</span>
-                                                </div>
+                                        <header onClick={() => toggleBatch(batchId)} className="p-3 flex justify-between items-center cursor-pointer hover:bg-gray-50">
+                                            <div className="flex flex-col">
+                                                <span className="font-bold text-gray-800">{batchId}</span>
+                                                <span className="text-xs text-gray-500">Received by {batch.receivedBy} on {batch.receivedAt}</span>
                                             </div>
-                                            <ChevronDown size={20} className={`transition-transform transform ${isBatchOpen ? 'rotate-180' : ''}`} />
+                                            <ChevronDown size={20} className={`transition-transform transform ${isOpen ? 'rotate-180' : ''}`} />
                                         </header>
-                                        {isBatchOpen && (
+                                        {isOpen && (
                                             <ul className="divide-y divide-gray-100 p-1">
                                                 {batch.items.map(item => {
-                                                    const isDisabled = isItemDisabled(item);
-                                                    const isSelected = !!selectedStock[item.id];
+                                                    const selection = selectedStock[item.id];
+                                                    const isSelected = !!selection;
+                                                    const summary = fulfillmentSummary[item.sku] || { needed: 0, selected: 0 };
+                                                    const maxAdd = summary.needed - (summary.selected - (isSelected ? selection.quantity : 0));
+                                                    const isDisabled = maxAdd <= 0 && !isSelected;
+                                                    if (item.isSerialized) {
+                                                        return (
+                                                            <li key={item.id} onClick={() => !isDisabled && handleQuantityChange(item, isSelected ? 0 : 1)} 
+                                                                className={`flex items-center p-2 rounded-md ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-indigo-50'} ${isSelected ? 'bg-green-100 font-semibold' : ''}`}>
+                                                                <div className="mr-3">{isSelected ? <CheckSquare className="text-green-600"/> : <Square className="text-gray-400"/>}</div>
+                                                                <Package size={20} className="mr-4 text-gray-500"/>
+                                                                <div className="flex-grow">
+                                                                    <p>{item.productName}</p>
+                                                                    <p className="text-xs text-gray-500 font-mono">Serial: {item.serial}</p>
+                                                                </div>
+                                                                {isDisabled && !isSelected && <span className="badge badge-sm badge-warning ml-2">Not Needed</span>}
+                                                            </li>
+                                                        );
+                                                    }
                                                     return (
-                                                        <li key={item.id} onClick={() => handleSelectionChange(item)} className={`flex items-center p-2 rounded-md transition-colors ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-indigo-50'} ${isSelected ? 'bg-green-50 font-semibold' : ''}`}>
-                                                            <div className="mr-3 p-1">
-                                                                {isSelected ? <CheckSquare className="text-green-600"/> : <Square className="text-gray-400"/>}
+                                                        <li key={item.id} className={`flex items-center p-2 rounded-md ${isDisabled && !isSelected ? 'opacity-50' : ''} ${isSelected ? 'bg-green-100' : ''}`}>
+                                                            <Package size={20} className="mr-4 text-gray-500"/>
+                                                            <div className="flex-grow">
+                                                                <p>{item.productName}</p>
+                                                                <p className="text-xs text-gray-600">Available Qty: {item.quantity}</p>
                                                             </div>
-                                                            <Package size={20} className="mr-4 text-gray-500 flex-shrink-0"/>
-                                                            <div className="flex-grow min-w-0">
-                                                                <p className="font-semibold text-sm truncate">{item.productName}</p>
-                                                                {item.isSerialized ? (
-                                                                    <p className="text-xs text-gray-500 font-mono truncate">Serial: {item.serial}</p>
-                                                                ) : (
-                                                                    <p className="text-xs text-gray-600 truncate">Qty: {item.quantity}</p>
-                                                                )}
+                                                            <div className="flex items-center gap-2">
+                                                                <button disabled={isDisabled || !isSelected} onClick={() => handleQuantityChange(item, (selection?.quantity || 0) - 1)}><MinusCircle size={18}/></button>
+                                                                <input type="number" value={selection?.quantity || 0} onChange={e => handleQuantityChange(item, parseInt(e.target.value, 10) || 0)} className="input input-bordered input-xs w-16 text-center" disabled={isDisabled} max={Math.min(item.quantity, maxAdd)} />
+                                                                <button disabled={isDisabled || (selection?.quantity || 0) >= item.quantity} onClick={() => handleQuantityChange(item, (selection?.quantity || 0) + 1)}><PlusCircle size={18}/></button>
                                                             </div>
-                                                            {isDisabled && !isSelected && <span className="badge badge-sm badge-warning ml-2 flex-shrink-0">Not Needed</span>}
                                                         </li>
                                                     );
                                                 })}

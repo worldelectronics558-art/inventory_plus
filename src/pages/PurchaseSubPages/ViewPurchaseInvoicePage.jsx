@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
@@ -43,7 +42,7 @@ const ViewPurchaseInvoicePage = () => {
 
             setIsLoading(true);
             try {
-                const invoiceDocRef = doc(db, 'artifacts', appId, 'purchaseInvoices', id);
+                const invoiceDocRef = doc(db, 'artifacts', appId, 'purchase_invoices', id);
                 
                 const docSnap = await getDoc(invoiceDocRef);
                 
@@ -83,6 +82,15 @@ const ViewPurchaseInvoicePage = () => {
 
     const canBeEdited = invoice.status !== 'FINALIZED' && invoice.status !== 'CANCELLED';
 
+    // Helper to safely get a numeric value, supporting old and new data structures
+    const getItemValue = (item, newKey, oldKey) => {
+        if (item[newKey] !== undefined) return item[newKey];
+        if (item[oldKey] !== undefined) return item[oldKey];
+        return 0;
+    };
+    
+    const GST_RATE = 0.18; // Assuming a constant rate for display calculation if needed
+
     return (
         <div className="page-container">
             <header className="page-header">
@@ -109,7 +117,7 @@ const ViewPurchaseInvoicePage = () => {
             </header>
 
             <div className="page-content">
-                <div className="card max-w-4xl mx-auto">
+                <div className="card max-w-5xl mx-auto">
                     <div className="p-6 border-b">
                          <div className="grid grid-cols-2 md:grid-cols-3 gap-y-4 gap-x-8">
                              <div>
@@ -148,31 +156,60 @@ const ViewPurchaseInvoicePage = () => {
                                         <th>Product</th>
                                         <th className="text-right">Ordered</th>
                                         <th className="text-right">Received</th>
-                                        <th className="text-right">Unit Price</th>
+                                        <th className="text-right">Unit Cost (Inc. Tax)</th>
+                                        <th className="text-right">Pre-Tax Cost</th>
+                                        <th className="text-right">Tax</th>
                                         <th className="text-right">Line Total</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {invoice.items && invoice.items.map((item, index) => (
-                                        <tr key={index}>
-                                            <td>
-                                                <div className="font-bold">{item.productName}</div>
-                                                <div className="text-sm opacity-70">SKU: {item.productId}</div>
-                                            </td>
-                                            <td className="text-right">{item.quantity}</td>
-                                            <td className="text-right font-semibold">{item.receivedQty || 0}</td>
-                                            <td className="text-right">Rs {item.unitPrice?.toFixed(2) || '0.00'}</td>
-                                            <td className="text-right font-bold">Rs {((item.quantity || 0) * (item.unitPrice || 0)).toFixed(2)}</td>
-                                        </tr>
-                                    ))}
+                                    {invoice.items && invoice.items.map((item, index) => {
+                                        const unitCostPrice = getItemValue(item, 'unitCostPrice', 'unitPrice');
+                                        const quantity = item.quantity || 0;
+                                        // For backward compatibility, calculate if new fields don't exist
+                                        const unitInvoicePrice = getItemValue(item, 'unitInvoicePrice', unitCostPrice / (1 + GST_RATE));
+                                        const unitPurchaseGST = getItemValue(item, 'unitPurchaseGST', unitInvoicePrice * GST_RATE);
+                                        const lineTotal = unitCostPrice * quantity;
+
+                                        return (
+                                            <tr key={index}>
+                                                <td>
+                                                    <div className="font-bold">{item.productName}</div>
+                                                    <div className="text-sm opacity-70">SKU: {item.productId}</div>
+                                                </td>
+                                                <td className="text-right">{quantity}</td>
+                                                <td className="text-right font-semibold">{item.receivedQty || 0}</td>
+                                                <td className="text-right">Rs {unitCostPrice.toFixed(2)}</td>
+                                                <td className="text-right">Rs {unitInvoicePrice.toFixed(2)}</td>
+                                                <td className="text-right">Rs {unitPurchaseGST.toFixed(2)}</td>
+                                                <td className="text-right font-bold">Rs {lineTotal.toFixed(2)}</td>
+                                            </tr>
+                                        );
+                                    })}
                                 </tbody>
-                                <tfoot>
-                                    <tr>
-                                        <th colSpan="4" className="text-right text-lg">Total Amount</th>
-                                        <th className="text-right text-lg">Rs {invoice.totalAmount?.toFixed(2) || '0.00'}</th>
-                                    </tr>
-                                </tfoot>
                             </table>
+                        </div>
+                    </div>
+                    <div className="p-6 bg-gray-50 border-t rounded-b-lg">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            <div className="md:col-span-2">
+                                <h4 className="font-semibold text-gray-700">Notes</h4>
+                                <p className="text-gray-600 mt-1">{invoice.notes || 'No notes for this invoice.'}</p>
+                            </div>
+                            <div className="md:col-span-2 space-y-3">
+                                 <div className="flex justify-between items-center text-lg">
+                                    <span className="text-gray-600">Subtotal (Pre-Tax):</span>
+                                    <span className="font-semibold text-gray-800">Rs {(invoice.totalPreTax ?? 0).toFixed(2)}</span>
+                                </div>
+                                <div className="flex justify-between items-center text-lg">
+                                    <span className="text-gray-600">Total Tax:</span>
+                                    <span className="font-semibold text-gray-800">Rs {(invoice.totalTax ?? 0).toFixed(2)}</span>
+                                </div>
+                                <div className="flex justify-between items-center text-2xl border-t pt-3 mt-2">
+                                    <span className="font-bold">Total Amount:</span>
+                                    <span className="font-bold text-emerald-600">Rs {(invoice.totalAmount ?? 0).toFixed(2)}</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

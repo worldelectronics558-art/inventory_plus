@@ -10,7 +10,6 @@ import {
     doc,
     updateDoc,
     deleteDoc,
-    writeBatch,
     serverTimestamp,
     runTransaction,
 } from 'firebase/firestore';
@@ -19,6 +18,7 @@ const SalesOrderContext = createContext();
 
 export const useSalesOrders = () => useContext(SalesOrderContext);
 
+// This function generates a unique, sequential, and time-based sales order number.
 const generateSalesOrderNumber = async (db, appId, orderDate) => {
     const d = orderDate.toDate ? orderDate.toDate() : new Date(orderDate);
     if (isNaN(d.getTime())) {
@@ -30,7 +30,6 @@ const generateSalesOrderNumber = async (db, appId, orderDate) => {
     try {
         const newOrderNumberStr = await runTransaction(db, async (transaction) => {
             const counterDoc = await transaction.get(counterRef);
-
             const year = d.getFullYear().toString().slice(-2);
             const month = (d.getMonth() + 1).toString().padStart(2, '0');
             const currentPeriod = `${year}${month}`;
@@ -43,18 +42,14 @@ const generateSalesOrderNumber = async (db, appId, orderDate) => {
                 }
             }
 
-            transaction.set(counterRef, {
-                currentCount: nextCount,
-                lastResetPeriod: currentPeriod
-            }, { merge: true });
+            transaction.set(counterRef, { currentCount: nextCount, lastResetPeriod: currentPeriod }, { merge: true });
 
-            const formattedCount = nextCount.toString().padStart(3, '0');
-            return `SO-${currentPeriod}-${formattedCount}`;
+            return `SO-${currentPeriod}-${nextCount.toString().padStart(3, '0')}`;
         });
         return newOrderNumberStr;
     } catch (e) {
         console.error("Failed to generate sales order number:", e);
-        throw new Error("Could not generate a new sales order number. Please try again.");
+        throw new Error("Could not generate a new sales order number.");
     }
 };
 
@@ -84,56 +79,24 @@ export const SalesOrderProvider = ({ children }) => {
     const addSalesOrder = useCallback(async (orderData, user) => {
         setIsMutationDisabled(true);
         try {
-            // --- Guard Clauses ---
-            if (!db || !appId) throw new Error("Database not configured.");
-            if (!orderData) throw new Error("orderData is missing.");
-            if (!orderData.orderDate) throw new Error("Order date is required.");
-            if (!user?.uid) throw new Error("User data is not available.");
+            if (!db || !appId || !orderData.orderDate || !user?.uid) throw new Error("Missing required data.");
 
             const collectionRef = collection(db, 'artifacts', appId, 'sales_orders');
             const newOrderNumber = await generateSalesOrderNumber(db, appId, orderData.orderDate);
-            
-            const parseAndValidateNumber = (value, defaultValue = 0) => {
-                const parsed = Number(value);
-                return isNaN(parsed) ? defaultValue : parsed;
-            };
 
-            // --- Sanitize Items ---
-            const sanitizedItems = Array.isArray(orderData.items)
-                ? orderData.items.map(item => ({
-                    productId: item.productId || null,
-                    productName: item.productName || 'N/A',
-                    quantity: parseAndValidateNumber(item.quantity, 1),
-                    unitPrice: parseAndValidateNumber(item.unitPrice),
-                    price: parseAndValidateNumber(item.price),
-                    tax: parseAndValidateNumber(item.tax),
-                }))
-                : [];
-
-            // --- Build a clean, explicit newOrder object ---
             const newOrder = {
-                customerId: orderData.customerId || null,
-                customerName: orderData.customerName || 'N/A',
-                orderDate: orderData.orderDate,
-                documentNumber: orderData.documentNumber || '',
-                notes: orderData.notes || '',
-                items: sanitizedItems,
-                totalPreTax: parseAndValidateNumber(orderData.totalPreTax),
-                totalTax: parseAndValidateNumber(orderData.totalTax),
-                totalAmount: parseAndValidateNumber(orderData.totalAmount),
+                ...orderData,
                 orderNumber: newOrderNumber,
+                items: (orderData.items || []).map(item => ({...item, deliveredQty: 0, returnedQty: 0})),
                 status: 'PENDING',
                 createdAt: serverTimestamp(),
-                createdBy: { 
-                    uid: user.uid,
-                    name: user.displayName || 'N/A'
-                },
+                createdBy: { uid: user.uid, name: user.displayName || 'N/A' },
             };
             
             await addDoc(collectionRef, newOrder);
         } catch (error) {
-            console.error("Failed to create sales order:", error, "Order Data:", orderData);
-            throw error; // Re-throw to be handled by the form
+            console.error("Failed to create sales order:", error);
+            throw error;
         } finally {
             setIsMutationDisabled(false);
         }
@@ -144,19 +107,22 @@ export const SalesOrderProvider = ({ children }) => {
         if (!db || !appId) throw new Error("Database not configured");
         const orderDocRef = doc(db, 'artifacts', appId, 'sales_orders', id);
         try {
-            return await updateDoc(orderDocRef, { ...updatedData, updatedAt: serverTimestamp() });
+            await updateDoc(orderDocRef, { ...updatedData, updatedAt: serverTimestamp() });
+        } catch(error){
+            console.error("Error updating sales order:", error);
+            throw error;
         } finally {
             setIsMutationDisabled(false);
         }
     }, [db, appId]);
 
-    const deleteSalesOrder = useCallback(async (orderId) => {
+    const deleteSalesOrder = useCallback(async (id) => {
         setIsMutationDisabled(true);
         if (!db || !appId) throw new Error("Database not configured");
-        const orderDocRef = doc(db, 'artifacts', appId, 'sales_orders', orderId);
+        const orderDocRef = doc(db, 'artifacts', appId, 'sales_orders', id);
         try {
             await deleteDoc(orderDocRef);
-        } catch (error) {
+        } catch(error){
             console.error("Error deleting sales order:", error);
             throw error;
         } finally {
@@ -164,31 +130,18 @@ export const SalesOrderProvider = ({ children }) => {
         }
     }, [db, appId]);
 
-    const removeStockItems = useCallback(async (orderId, updatedOrderData, pendingDeliverableIds) => {
-        if (!db || !appId) throw new Error("Database not configured");
-
-        const batch = writeBatch(db);
-
-        const orderDocRef = doc(db, 'artifacts', appId, 'sales_orders', orderId);
-        batch.update(orderDocRef, { ...updatedOrderData, status: 'FINALIZED', updatedAt: serverTimestamp() });
-
-        const deliverablesCollectionRef = collection(db, 'artifacts', appId, 'pending_deliverables');
-        pendingDeliverableIds.forEach(id => {
-            const docRef = doc(deliverablesCollectionRef, id);
-            batch.delete(docRef);
-        });
-
-        await batch.commit();
-    }, [db, appId]);
+    // The complex `finalizeSalesOrderDelivery` function has been removed.
+    // This logic is now handled directly in the `FinalizeSalesOrder` component
+    // using a secure and atomic transaction to ensure data integrity.
 
     const value = {
         salesOrders,
         addSalesOrder,
         updateSalesOrder,
         deleteSalesOrder,
-        removeStockItems,
         isLoading,
         isMutationDisabled,
+        setIsMutationDisabled // *** CORRECTED: Was setMutationDisabled ***
     };
 
     return (

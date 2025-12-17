@@ -9,19 +9,22 @@ import { ChevronRight, Warehouse } from 'lucide-react';
  *
  * @param {object} props
  * @param {object} props.item - The inventory data item for a product.
- * @param {string[]} props.locations - An array of location names.
- * @param {string} props.productId - The ID of the product for navigation.
+ * @param {string} [props.navigateTo] - Optional navigation path. If provided, overrides default navigation.
  */
-const InventoryCard = ({ item, locations, productId }) => {
+const InventoryCard = ({ item, navigateTo }) => {
     const navigate = useNavigate();
 
     if (!item) return null;
 
     const handleCardClick = () => {
-        if (productId) {
-            navigate(`/products/details/${productId}`);
+        // Use the navigateTo prop if it exists, otherwise use the default.
+        const destination = navigateTo || (item.productId ? `/products/details/${item.productId}` : null);
+        if (destination) {
+            navigate(destination);
         }
     };
+    
+    const locationsWithStock = item.stockByLocation?.filter(loc => loc.stock > 0) || [];
 
     return (
         <div 
@@ -32,9 +35,17 @@ const InventoryCard = ({ item, locations, productId }) => {
             <div className="p-4 flex justify-between items-start">
                 <div className="flex-grow pr-4">
                     <h3 className="font-bold text-base text-primary-900 truncate">{item.displayName}</h3>
-                    <p className="text-sm text-gray-500">Total Stock: <span className="font-bold text-lg text-blue-600">{item.totalStock}</span></p>
+                    <p className="text-sm text-gray-500">
+                        Total Stock: 
+                        <span className={`font-bold text-lg ml-2 ${item.totalStock <= item.reorderPoint ? 'text-red-600' : 'text-blue-600'}`}>
+                            {item.totalStock}
+                        </span>
+                        {item.reorderPoint > 0 && (
+                             <span className="text-xs text-gray-400 ml-2">(Reorder @ {item.reorderPoint})</span>
+                        )}
+                    </p>
                 </div>
-                {productId && (
+                {item.productId && (
                     <div className="flex items-center text-gray-400 shrink-0">
                         <ChevronRight size={20} />
                     </div>
@@ -42,26 +53,25 @@ const InventoryCard = ({ item, locations, productId }) => {
             </div>
 
             {/* --- LOCATIONS BREAKDOWN --- */}
-            <div className="px-4 pb-4 border-t border-gray-100">
-                <h4 className="text-xs font-semibold text-gray-500 uppercase mt-3 mb-2">Stock by Location</h4>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2 text-sm">
-                    {locations.map(loc => {
-                        const quantity = item[loc] || 0;
-                        if (quantity === 0) return null; // Don't show locations with zero stock
-                        
-                        // Highlight low stock
-                        const quantityColor = quantity > 5 ? 'text-gray-800' : 'text-red-600';
+            {locationsWithStock.length > 0 && (
+                <div className="px-4 pb-4 border-t border-gray-100">
+                    <h4 className="text-xs font-semibold text-gray-500 uppercase mt-3 mb-2">Stock by Location</h4>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2 text-sm">
+                        {locationsWithStock.map(loc => {
+                             // Simple quantity color coding. Red if 5 or less, otherwise gray.
+                            const quantityColor = loc.stock > 5 ? 'text-gray-800' : 'text-red-600';
 
-                        return (
-                            <div key={loc} className="flex items-center">
-                                <Warehouse size={14} className="text-gray-400 mr-2 shrink-0"/>
-                                <span className="text-gray-600 truncate">{loc}:</span>
-                                <span className={`font-bold ml-1 ${quantityColor}`}>{quantity}</span>
-                            </div>
-                        );
-                    })}
+                            return (
+                                <div key={loc.id} className="flex items-center">
+                                    <Warehouse size={14} className="text-gray-400 mr-2 shrink-0"/>
+                                    <span className="text-gray-600 truncate">{loc.name}:</span>
+                                    <span className={`font-bold ml-1 ${quantityColor}`}>{loc.stock}</span>
+                                </div>
+                            );
+                        })}
+                    </div>
                 </div>
-            </div>
+            )}
         </div>
     );
 };

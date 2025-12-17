@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import Select from 'react-select';
 import { useNavigate, Link, useParams } from 'react-router-dom';
@@ -9,8 +8,7 @@ import { useProducts } from '../../contexts/ProductContext.jsx';
 import { getProductDisplayName } from '../../utils/productUtils.js';
 import LoadingOverlay from '../../components/LoadingOverlay';
 
-// --- STYLING & CONSTANTS ---
-const GST_RATE = 0.18; // 18% GST
+const GST_RATE = 0.18;
 const roundToTwo = (num) => Math.round((num + Number.EPSILON) * 100) / 100;
 
 const customSelectStyles = {
@@ -27,30 +25,35 @@ const EditPurchaseInvoiceForm = () => {
     const { suppliers } = useSuppliers();
     const { products } = useProducts();
 
-    // --- STATE MANAGEMENT ---
     const [invoice, setInvoice] = useState(null);
     const [formState, setFormState] = useState(null);
     const [error, setError] = useState('');
 
-    // --- MEMOIZED OPTIONS FOR SELECTS ---
     const supplierOptions = useMemo(() => suppliers.map(s => ({ value: s.id, label: s.name })), [suppliers]);
     const productOptions = useMemo(() => products.map(p => ({ value: p.sku, label: getProductDisplayName(p), purchasePrice: p.purchasePrice ?? 0 })), [products]);
     
-    // --- LOAD INVOICE DATA ---
     useEffect(() => {
         if (!isLoading && purchaseInvoices && purchaseInvoices.length > 0) {
             const invoiceToEdit = purchaseInvoices.find(inv => inv.id === id);
             if (invoiceToEdit) {
                 setInvoice(invoiceToEdit);
                 
-                const items = (invoiceToEdit.items || []).map(item => ({
-                    ...item,
-                    unitCost: item.unitCost || 0,
-                    productId: productOptions.find(p => p.value === item.productId) || null,
-                }));
+                const items = (invoiceToEdit.items || []).map(item => {
+                    const unitCostPrice = item.unitCostPrice ?? item.unitPrice ?? 0;
+                    const unitInvoicePrice = item.unitInvoicePrice ?? (unitCostPrice / (1 + GST_RATE));
+                    const unitPurchaseGST = item.unitPurchaseGST ?? (unitInvoicePrice * GST_RATE);
+                    return {
+                        ...item,
+                        unitCostPrice,
+                        unitInvoicePrice,
+                        unitPurchaseGST,
+                        // This is the key change: ensure productId is an object for the Select component
+                        productId: productOptions.find(p => p.value === item.productId) || null,
+                    };
+                });
 
                 if (items.length === 0) {
-                    items.push({ productId: null, quantity: 1, unitCost: 0, price: 0, tax: 0 });
+                    items.push({ productId: null, quantity: 1, unitCostPrice: 0, unitInvoicePrice: 0, unitPurchaseGST: 0 });
                 }
 
                 setFormState({
@@ -66,35 +69,35 @@ const EditPurchaseInvoiceForm = () => {
         }
     }, [id, purchaseInvoices, isLoading, supplierOptions, productOptions]);
 
-    // --- HANDLERS ---
     const handleItemChange = (index, field, value) => {
         const newItems = [...formState.items];
         const currentItem = { ...newItems[index] };
 
         currentItem[field] = value;
 
-        let unitCost = Number(currentItem.unitCost) || 0;
+        let unitCostPrice = Number(currentItem.unitCostPrice) || 0;
 
         if (field === 'productId') {
-            unitCost = value?.purchasePrice ?? 0;
-            currentItem.unitCost = unitCost;
+            unitCostPrice = value?.purchasePrice ?? 0;
+            currentItem.unitCostPrice = unitCostPrice;
+            currentItem.productName = value?.label; // Make sure to update the name
         }
         
-        if (field === 'unitCost') {
-            unitCost = Number(value) || 0;
+        if (field === 'unitCostPrice') {
+            unitCostPrice = Number(value) || 0;
         }
 
-        const price = unitCost / (1 + GST_RATE);
-        const tax = price * GST_RATE;
+        const unitInvoicePrice = unitCostPrice / (1 + GST_RATE);
+        const unitPurchaseGST = unitInvoicePrice * GST_RATE;
 
-        currentItem.price = price;
-        currentItem.tax = tax;
+        currentItem.unitInvoicePrice = unitInvoicePrice;
+        currentItem.unitPurchaseGST = unitPurchaseGST;
 
         newItems[index] = currentItem;
         setFormState(prevState => ({ ...prevState, items: newItems }));
     };
 
-    const addNewItem = () => setFormState(prevState => ({ ...prevState, items: [...prevState.items, { productId: null, quantity: 1, unitCost: 0, price: 0, tax: 0 }] }));
+    const addNewItem = () => setFormState(prevState => ({ ...prevState, items: [...prevState.items, { productId: null, quantity: 1, unitCostPrice: 0, unitInvoicePrice: 0, unitPurchaseGST: 0 }] }));
     
     const removeItem = (index) => {
         if (formState.items.length > 1) {
@@ -102,23 +105,18 @@ const EditPurchaseInvoiceForm = () => {
         }
     };
 
-    // --- TOTALS CALCULATION ---
     const totals = useMemo(() => {
         if (!formState) return { totalPreTax: 0, totalTax: 0, grandTotal: 0 };
 
         return formState.items.reduce((acc, item) => {
             const quantity = Number(item.quantity) || 0;
-            const price = Number(item.price) || 0;
-            const tax = Number(item.tax) || 0;
-            
-            acc.totalPreTax += price * quantity;
-            acc.totalTax += tax * quantity;
-            acc.grandTotal = acc.totalPreTax + acc.totalTax;
+            acc.totalPreTax += item.unitInvoicePrice * quantity;
+            acc.totalTax += item.unitPurchaseGST * quantity;
+            acc.grandTotal += (item.unitInvoicePrice + item.unitPurchaseGST) * quantity;
             return acc;
         }, { totalPreTax: 0, totalTax: 0, grandTotal: 0 });
     }, [formState]);
 
-    // --- FORM SUBMISSION ---
     const handleSubmit = async (e) => {
         e.preventDefault();
         if (!formState.supplierId || formState.items.some(item => !item.productId || !item.productId.value || Number(item.quantity) <= 0)) {
@@ -127,18 +125,21 @@ const EditPurchaseInvoiceForm = () => {
         }
 
         const updatedInvoiceData = {
-            ...formState,
+            id: id, // Pass the ID for the update function
             supplierId: formState.supplierId.value,
             supplierName: formState.supplierId.label,
             invoiceDate: new Date(formState.invoiceDate),
+            documentNumber: formState.documentNumber,
+            notes: formState.notes,
             items: formState.items.map(item => ({
-                ...item,
+                // Explicitly define the object being saved
                 productId: item.productId.value,
-                productName: item.productId.label,
-                unitCost: roundToTwo(Number(item.unitCost)),
-                price: roundToTwo(Number(item.price)),
-                tax: roundToTwo(Number(item.tax)),
-                quantity: Number(item.quantity)
+                productName: item.productName,
+                quantity: Number(item.quantity),
+                unitCostPrice: roundToTwo(Number(item.unitCostPrice)),
+                unitInvoicePrice: roundToTwo(Number(item.unitInvoicePrice)),
+                unitPurchaseGST: roundToTwo(Number(item.unitPurchaseGST)),
+                receivedQty: item.receivedQty || 0 // Preserve existing receivedQty
             })),
             totalPreTax: roundToTwo(totals.totalPreTax),
             totalTax: roundToTwo(totals.totalTax),
@@ -229,16 +230,16 @@ const EditPurchaseInvoiceForm = () => {
                                     <input type="number" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', e.target.value)} min="1" className="input-base w-full text-center" required />
                                 </div>
                                 <div className="col-span-2">
-                                    <input type="number" value={item.unitCost} onChange={(e) => handleItemChange(index, 'unitCost', e.target.value)} min="0" step="0.01" className="input-base w-full text-right" required />
+                                    <input type="number" value={item.unitCostPrice} onChange={(e) => handleItemChange(index, 'unitCostPrice', e.target.value)} min="0" step="0.01" className="input-base w-full text-right" required />
                                 </div>
                                 <div className="col-span-2">
-                                    <input type="text" value={roundToTwo(item.price).toFixed(2)} className="input-base w-full text-right bg-gray-100" readOnly disabled/>
+                                    <input type="text" value={roundToTwo(item.unitInvoicePrice).toFixed(2)} className="input-base w-full text-right bg-gray-100" readOnly disabled/>
                                 </div>
                                 <div className="col-span-2">
-                                     <input type="text" value={roundToTwo(item.tax).toFixed(2)} className="input-base w-full text-right bg-gray-100" readOnly disabled/>
+                                     <input type="text" value={roundToTwo(item.unitPurchaseGST).toFixed(2)} className="input-base w-full text-right bg-gray-100" readOnly disabled/>
                                 </div>
                                 <div className="col-span-1 text-right font-medium">
-                                    Rs {roundToTwo(item.unitCost * (Number(item.quantity) || 0)).toFixed(2)}
+                                    Rs {roundToTwo(item.unitCostPrice * (Number(item.quantity) || 0)).toFixed(2)}
                                 </div>
                                 <div className="col-span-1 flex items-center justify-center">
                                     {formState.items.length > 1 && (

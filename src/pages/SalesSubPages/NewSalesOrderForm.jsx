@@ -36,14 +36,14 @@ const NewSalesOrderForm = () => {
             try {
                 const parsed = JSON.parse(savedState);
                 if (!Array.isArray(parsed.items) || parsed.items.length === 0) {
-                     parsed.items = [{ productId: null, quantity: 1, unitPrice: 0, price: 0, tax: 0 }];
+                     parsed.items = [{ productId: null, quantity: 1, unitSalePrice: 0, unitRetailPrice: 0, unitSaleGST: 0 }];
                 }
                 return parsed;
             } catch (e) {
-                return { customerId: null, orderDate: new Date().toISOString().slice(0, 10), documentNumber: '', notes: '', items: [{ productId: null, quantity: 1, unitPrice: 0, price: 0, tax: 0 }] };
+                return { customerId: null, orderDate: new Date().toISOString().slice(0, 10), documentNumber: '', notes: '', items: [{ productId: null, quantity: 1, unitSalePrice: 0, unitRetailPrice: 0, unitSaleGST: 0 }] };
             }
         } 
-        return { customerId: null, orderDate: new Date().toISOString().slice(0, 10), documentNumber: '', notes: '', items: [{ productId: null, quantity: 1, unitPrice: 0, price: 0, tax: 0 }] };
+        return { customerId: null, orderDate: new Date().toISOString().slice(0, 10), documentNumber: '', notes: '', items: [{ productId: null, quantity: 1, unitSalePrice: 0, unitRetailPrice: 0, unitSaleGST: 0 }] };
     });
 
     const { customerId, orderDate, documentNumber, notes, items } = formState;
@@ -66,28 +66,28 @@ const NewSalesOrderForm = () => {
 
         currentItem[field] = value;
 
-        let unitPrice = Number(currentItem.unitPrice) || 0;
+        let unitSalePrice = Number(currentItem.unitSalePrice) || 0;
 
         if (field === 'productId') {
-            unitPrice = value?.salePrice ?? 0;
-            currentItem.unitPrice = unitPrice;
+            unitSalePrice = value?.salePrice ?? 0;
+            currentItem.unitSalePrice = unitSalePrice;
         }
         
-        if (field === 'unitPrice') {
-            unitPrice = Number(value) || 0;
+        if (field === 'unitSalePrice') {
+            unitSalePrice = Number(value) || 0;
         }
 
-        const price = unitPrice / (1 + GST_RATE);
-        const tax = price * GST_RATE;
+        const unitRetailPrice = unitSalePrice / (1 + GST_RATE);
+        const unitSaleGST = unitRetailPrice * GST_RATE;
 
-        currentItem.price = price;
-        currentItem.tax = tax;
+        currentItem.unitRetailPrice = unitRetailPrice;
+        currentItem.unitSaleGST = unitSaleGST;
 
         newItems[index] = currentItem;
         updateForm('items', newItems);
     };
 
-    const addNewItem = () => updateForm('items', [...items, { productId: null, quantity: 1, unitPrice: 0, price: 0, tax: 0 }]);
+    const addNewItem = () => updateForm('items', [...items, { productId: null, quantity: 1, unitSalePrice: 0, unitRetailPrice: 0, unitSaleGST: 0 }]);
     const removeItem = (index) => {
         if (items.length > 1) updateForm('items', items.filter((_, i) => i !== index));
     };
@@ -95,11 +95,10 @@ const NewSalesOrderForm = () => {
     const totals = useMemo(() => {
         return items.reduce((acc, item) => {
             const quantity = Number(item.quantity) || 0;
-            const price = Number(item.price) || 0;
-            const tax = Number(item.tax) || 0;
-            acc.totalPreTax += price * quantity;
-            acc.totalTax += tax * quantity;
-            acc.grandTotal = acc.totalPreTax + acc.totalTax;
+            const itemTotal = (item.unitRetailPrice + item.unitSaleGST) * quantity;
+            acc.totalPreTax += item.unitRetailPrice * quantity;
+            acc.totalTax += item.unitSaleGST * quantity;
+            acc.grandTotal += itemTotal;
             return acc;
         }, { totalPreTax: 0, totalTax: 0, grandTotal: 0 });
     }, [items]);
@@ -129,11 +128,11 @@ const NewSalesOrderForm = () => {
                     if (!product) throw new Error(`Details for product with SKU ${item.productId.value} could not be found.`);
                     return {
                         productId: item.productId.value,
-                        productName: product.name,
+                        productName: getProductDisplayName(product),
                         quantity: Number(item.quantity),
-                        unitPrice: roundToTwo(Number(item.unitPrice)), 
-                        price: roundToTwo(Number(item.price)),       
-                        tax: roundToTwo(Number(item.tax)),
+                        unitSalePrice: roundToTwo(Number(item.unitSalePrice)), 
+                        unitRetailPrice: roundToTwo(Number(item.unitRetailPrice)),       
+                        unitSaleGST: roundToTwo(Number(item.unitSaleGST)),
                     };
                 }),
                 totalPreTax: roundToTwo(totals.totalPreTax), 
@@ -209,16 +208,16 @@ const NewSalesOrderForm = () => {
                                     <input type="number" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', e.target.value)} min="1" className="input-base w-full text-center" required />
                                 </div>
                                 <div className="col-span-2">
-                                    <input type="number" value={item.unitPrice} onChange={(e) => handleItemChange(index, 'unitPrice', e.target.value)} min="0" step="0.01" className="input-base w-full text-right" required />
+                                    <input type="number" value={item.unitSalePrice} onChange={(e) => handleItemChange(index, 'unitSalePrice', e.target.value)} min="0" step="0.01" className="input-base w-full text-right" required />
                                 </div>
                                 <div className="col-span-2">
-                                    <input type="text" value={roundToTwo(item.price).toFixed(2)} className="input-base w-full text-right bg-gray-100" readOnly disabled/>
+                                    <input type="text" value={roundToTwo(item.unitRetailPrice).toFixed(2)} className="input-base w-full text-right bg-gray-100" readOnly disabled/>
                                 </div>
                                 <div className="col-span-2">
-                                     <input type="text" value={roundToTwo(item.tax).toFixed(2)} className="input-base w-full text-right bg-gray-100" readOnly disabled/>
+                                     <input type="text" value={roundToTwo(item.unitSaleGST).toFixed(2)} className="input-base w-full text-right bg-gray-100" readOnly disabled/>
                                 </div>
                                 <div className="col-span-1 text-right font-medium">
-                                    Rs {roundToTwo(item.unitPrice * (Number(item.quantity) || 0)).toFixed(2)}
+                                    Rs {roundToTwo(item.unitSalePrice * (Number(item.quantity) || 0)).toFixed(2)}
                                 </div>
                                 <div className="col-span-1 flex items-center justify-center">
                                     {items.length > 1 && (
