@@ -1,6 +1,4 @@
 
-// src/pages/SalesSubPages/FinalizeSalesOrder.jsx
-
 import React, { useState, useMemo, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { doc, runTransaction, collection, serverTimestamp, increment } from 'firebase/firestore';
@@ -38,7 +36,7 @@ const FinalizeSalesOrder = () => {
     const deliverable = useMemo(() => pendingDeliverables.find(d => d.id === deliverableId), [pendingDeliverables, deliverableId]);
     const productMap = useMemo(() => products.reduce((acc, p) => ({ ...acc, [p.id]: p }), {}), [products]);
 
-    // --- Main Transaction Logic (Re-architected to mirror FinalizePurchaseInvoice) ---
+    // --- Main Transaction Logic (Aligned with FinalizePurchaseInvoice) ---
     const handleFinalizeDelivery = useCallback(async () => {
         setError('');
         if (!userId || !currentUser) { setError('User data not available. Please try again.'); return; }
@@ -56,6 +54,7 @@ const FinalizeSalesOrder = () => {
                 const deliverableRef = doc(db, `artifacts/${appId}/pending_deliverables`, deliverable.id);
                 const salesRecordsRef = collection(db, `artifacts/${appId}/sales_records`);
                 const historyCollectionRef = collection(db, `artifacts/${appId}/item_history`);
+                const productsCollectionRef = collection(db, `artifacts/${appId}/products`);
                 const soRef = isDirectDelivery ? null : doc(db, `artifacts/${appId}/sales_orders`, deliverable.salesOrderId);
 
                 // --- PHASE 1: READS ---
@@ -64,19 +63,26 @@ const FinalizeSalesOrder = () => {
 
                 const soDoc = soRef ? await transaction.get(soRef) : null;
                 if (soRef && !soDoc.exists()) throw new Error("The associated Sales Order could not be found.");
-
-                const inventoryItemIds = deliverable.items.map(item => item.inventoryItemId).filter(Boolean);
-                if (inventoryItemIds.length !== deliverable.items.length) {
-                    throw new Error("Data inconsistency: Not all delivery items have an inventory ID. The batch may be corrupt.");
-                }
+                
+                const inventoryItemIds = [...new Set(deliverable.items.map(item => item.inventoryItemId))];
+                const productIds = [...new Set(deliverable.items.map(item => item.productId))];
 
                 const inventoryDocsPromise = inventoryItemIds.map(id => transaction.get(doc(db, `artifacts/${appId}/inventory_items`, id)));
-                const inventoryDocs = await Promise.all(inventoryDocsPromise);
+                const productDocsPromise = productIds.map(id => transaction.get(doc(productsCollectionRef, id)));
+
+                const [inventoryDocs, productDocs] = await Promise.all([Promise.all(inventoryDocsPromise), Promise.all(productDocsPromise)]);
+                
                 const inventoryDataMap = inventoryDocs.reduce((acc, doc) => {
                     if (doc.exists()) acc[doc.id] = doc.data();
                     return acc;
                 }, {});
-                
+
+                // This read is not strictly necessary for the transaction writes, but good for validation
+                // const productsDataMap = productDocs.reduce((acc, doc) => {
+                //     if (doc.exists()) acc[doc.id] = doc.data();
+                //     return acc;
+                // }, {});
+
                 // --- PHASE 2: PROCESS & PREPARE WRITES ---
                 const salesOrderData = soDoc ? soDoc.data() : null;
                 const updatedSoItems = soDoc ? JSON.parse(JSON.stringify(salesOrderData.items)) : null;
@@ -85,8 +91,8 @@ const FinalizeSalesOrder = () => {
                 for (const item of deliverable.items) {
                     const invItemData = inventoryDataMap[item.inventoryItemId];
                     if (!invItemData) throw new Error(`Inventory item ${item.inventoryItemId} could not be found.`);
-                    if (invItemData.status !== 'in_stock') throw new Error(`Stock for ${item.productName} is no longer available.`);
-
+                    if (invItemData.status !== 'in_stock') throw new Error(`Stock for ${item.productName} (${item.serial || 'N/A'}) is no longer available.`);
+                    
                     const invItemRef = doc(db, `artifacts/${appId}/inventory_items`, item.inventoryItemId);
                     const soItemForPrice = updatedSoItems?.find(i => i.productId === item.productId);
 
@@ -102,8 +108,13 @@ const FinalizeSalesOrder = () => {
                     if (item.isSerialized) {
                         transaction.update(invItemRef, { status: 'delivered', deliveryDetails });
                     } else {
-                        if (invItemData.quantity < item.quantity) throw new Error(`Not enough quantity for ${item.productName}.`);
-                        transaction.update(invItemRef, { quantity: increment(-item.quantity), status: invItemData.quantity === item.quantity ? 'delivered' : 'in_stock', deliveryDetails });
+                        if (invItemData.quantity < item.quantity) throw new Error(`Not enough quantity for ${item.productName}. Available: ${invItemData.quantity}, Needed: ${item.quantity}.`);
+                        const newQuantity = invItemData.quantity - item.quantity;
+                        transaction.update(invItemRef, { 
+                            quantity: newQuantity, 
+                            ...(newQuantity === 0 && { status: 'delivered' }), // Only change status if quantity is zero
+                            deliveryDetails: { ...(invItemData.deliveryDetails || {}), ...deliveryDetails } // Merge details
+                        });
                     }
 
                     // 2. Prepare Sales Record Creation
@@ -113,10 +124,8 @@ const FinalizeSalesOrder = () => {
                         customerId: isDirectDelivery ? null : salesOrderData.customerId,
                         customerName: isDirectDelivery ? 'Direct Delivery' : salesOrderData.customerName,
                         locationId: item.locationId,
-                        unitSalePrice: soItemForPrice?.unitSalePrice || 0, // Price comes from SO if it exists
-                        unitRetailPrice: soItemForPrice?.unitRetailPrice || 0,
-                        unitSaleGST: soItemForPrice?.unitSaleGST || 0,
-                        unitCostPrice: invItemData.unitCostPrice || 0, // Cost comes from the specific inventory item
+                        unitSalePrice: soItemForPrice?.unitSalePrice || 0,
+                        unitCostPrice: invItemData.unitCostPrice || 0,
                         finalizedAt: serverTimestamp(),
                         finalizedBy: { uid: userId, name: currentUser.displayName || 'N/A' }, appId: appId,
                     });
@@ -137,15 +146,23 @@ const FinalizeSalesOrder = () => {
                         if (soItemToUpdate) soItemToUpdate.deliveredQty = (soItemToUpdate.deliveredQty || 0) + item.quantity;
                     }
                     
-                    const stockUpdate = stockSummaryUpdates.get(item.productId) || { qty: 0, locationId: item.locationId };
-                    stockSummaryUpdates.set(item.productId, { qty: stockUpdate.qty + item.quantity, locationId: item.locationId });
+                    if (!stockSummaryUpdates.has(item.productId)) {
+                        stockSummaryUpdates.set(item.productId, { qtyChange: 0, locationChanges: new Map() });
+                    }
+                    const stockUpdate = stockSummaryUpdates.get(item.productId);
+                    stockUpdate.qtyChange -= item.quantity; // Decrement stock
+                    const locChanges = stockUpdate.locationChanges;
+                    locChanges.set(item.locationId, (locChanges.get(item.locationId) || 0) - item.quantity);
                 }
 
                 // --- PHASE 3: WRITES ---
                 for (const [productId, update] of stockSummaryUpdates.entries()) {
-                    const productRef = doc(db, `artifacts/${appId}/products`, productId);
-                    const locationStockField = `stockSummary.byLocation.${update.locationId}`;
-                    transaction.update(productRef, { 'stockSummary.totalInStock': increment(-update.qty), [locationStockField]: increment(-update.qty) });
+                    const productRef = doc(productsCollectionRef, productId);
+                    const updates = { 'stockSummary.totalInStock': increment(update.qtyChange) };
+                    for (const [locId, qty] of update.locationChanges.entries()) {
+                        updates[`stockSummary.byLocation.${locId}`] = increment(qty);
+                    }
+                    transaction.update(productRef, updates);
                 }
 
                 if (soRef && updatedSoItems) {
