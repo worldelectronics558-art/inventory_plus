@@ -177,10 +177,10 @@ const ProductsPage = () => {
 
   const productsWithStock = useMemo(() => {
     // The 'products' from useProducts now includes a 'stockSummary' object.
-    // We just need to use 'inStock' as 'totalStock' for this component's use.
+  // Use the canonical total stock field from stockSummary.
     return products.map(p => ({
         ...p,
-        totalStock: p.stockSummary?.inStock || 0
+      totalStock: p.stockSummary?.totalInStock ?? p.stockSummary?.inStock ?? 0
     }));
   }, [products]);
 
@@ -311,7 +311,6 @@ const ProductsPage = () => {
                     pagination={true}
                     paginationPageSize={100}
                     paginationPageSizeSelector={[25, 50, 100, 200]}
-                    rowSelection={'single'}
                     onCellClicked={(params) => {
                         // Check if the click was not on an action button before navigating
                         if (params.event.target.closest('.flex.justify-end')) return;

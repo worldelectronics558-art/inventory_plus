@@ -3,7 +3,7 @@
 
 import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import { useAuth } from './AuthContext';
-import { collection, onSnapshot, addDoc, doc, deleteDoc, writeBatch, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
+import { collection, onSnapshot, setDoc, doc, deleteDoc, writeBatch, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
 import { generateDeliveryBatchId } from '../firebase/system_services';
 
 const PendingDeliverablesContext = createContext();
@@ -26,10 +26,12 @@ export const PendingDeliverablesProvider = ({ children }) => {
 
         setIsLoading(true);
         const deliverablesCollectionRef = collection(db, `/artifacts/${appId}/pending_deliverables`);
+        // Mirror PendingReceivables behaviour: only listen to PENDING docs
+        const q = query(deliverablesCollectionRef, where('status', '==', 'PENDING_DELIVERY'));
 
-        const unsubscribe = onSnapshot(deliverablesCollectionRef, (snapshot) => {
-            const deliverableItems = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            setPendingDeliverables(deliverableItems);
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const deliverableBatches = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setPendingDeliverables(deliverableBatches);
             setIsLoading(false);
         }, (err) => {
             console.error("Failed to listen to pending deliverables collection:", err);
@@ -51,7 +53,7 @@ export const PendingDeliverablesProvider = ({ children }) => {
             const batchId = await generateDeliveryBatchId(db, appId);
             const deliverablesCollectionRef = collection(db, `artifacts/${appId}/pending_deliverables`);
 
-            const allItems = items.map(item => ({ 
+            const allItems = items.map(item => ({
                 productId: item.productId,
                 productName: item.productName,
                 isSerialized: item.isSerialized,
@@ -59,22 +61,21 @@ export const PendingDeliverablesProvider = ({ children }) => {
                 serial: item.serial || null,
                 quantity: item.quantity,
                 inventoryItemId: item.inventoryItemId || null,
-                locationId: item.locationId
+                locationId: item.locationId,
+                status: 'PENDING', // Match per-item status pattern from pending_receivables
             }));
             
-            // This function NO LONGER updates the sales order status.
-            // It only creates the deliverable document.
-            // The SO status is now updated ONLY upon finalization in FinalizeSalesOrder.jsx
-            await addDoc(deliverablesCollectionRef, {
+            // Align shape with pending_receivables: one document per batch, keyed by batchId.
+            await setDoc(doc(deliverablesCollectionRef, batchId), {
                 salesOrderId: order.id,
                 salesOrderNumber: order.orderNumber,
                 customerName: order.customerName,
                 customerId: order.customerId,
-                batchId: batchId,
+                batchId,
                 items: allItems,
                 status: 'PENDING_DELIVERY',
                 createdAt: serverTimestamp(),
-                createdBy: { uid: userId, name: user.displayName || 'N/A' }
+                createdBy: { uid: userId, name: user.displayName || 'N/A' },
             });
 
         } catch (error) {

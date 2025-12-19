@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useUser } from '../contexts/UserContext';
 import { useProducts } from '../contexts/ProductContext';
 import localforage from 'localforage';
 
@@ -17,6 +18,7 @@ const MetricCard = ({ title, value, isLoading }) => (
 );
 
 const DashboardPage = () => {
+    const { currentUser } = useUser();
     const { userId } = useAuth();
     const { products, isLoading: isLoadingProducts } = useProducts();
     const [isClearingCache, setIsClearingCache] = React.useState(false);
@@ -39,7 +41,11 @@ const DashboardPage = () => {
     };
 
     const totalProducts = products.length;
-    const lowStockItems = products.filter(p => p.reorderPoint && p.stockSummary?.inStock <= p.reorderPoint).length;
+    const lowStockItems = products.filter(p => {
+        if (!p.reorderPoint) return false;
+        const totalStock = p.stockSummary?.totalInStock ?? p.stockSummary?.inStock ?? 0;
+        return totalStock <= p.reorderPoint;
+    }).length;
 
     return (
         <div className="min-h-screen bg-gray-100">
@@ -51,6 +57,10 @@ const DashboardPage = () => {
                 <p className="font-semibold text-blue-800">
                     <span className="font-bold">Auth Status:</span> Ready. 
                     <span className="ml-4 font-normal text-sm">User ID (for Firestore Path): {userId}</span>
+                </p>
+                <p className="font-semibold text-blue-800">
+                    <span className="font-bold">User Info:</span> Loaded.
+                    <span className="ml-4 font-normal text-sm">User Name: {currentUser.displayName}</span>
                 </p>
             </div>
 

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import Select from 'react-select';
 import { useNavigate, Link } from 'react-router-dom';
 import { useUser } from '../../contexts/UserContext';
@@ -7,16 +7,33 @@ import { useLocations } from '../../contexts/LocationContext';
 import { usePendingDeliverables } from '../../contexts/PendingDeliverablesContext';
 import useLiveInventory from '../../hooks/useLiveInventory';
 import { getProductDisplayName } from '../../utils/productUtils';
-import { Plus, ChevronLeft, Send, Search, X, Package, CheckCircle } from 'lucide-react';
+import { Plus, ChevronLeft, Send, X, CheckCircle } from 'lucide-react';
 import { useLoading } from '../../contexts/LoadingContext';
 import LoadingSpinner from '../../components/LoadingOverlay';
 
 const customSelectStyles = {
-    control: (p, s) => ({ ...p, width: '100%', backgroundColor: '#fff', border: s.isFocused ? '2px solid #3B82F6' : '1px solid #D1D5DB', borderRadius: '0.5rem', padding: '0.1rem 0', boxShadow: 'none', '&:hover': { borderColor: s.isFocused ? '#3B82F6' : '#9CA3AF' } }),
+    control: (p, s) => ({
+        ...p,
+        width: '100%',
+        backgroundColor: '#fff',
+        border: s.isFocused ? '2px solid #059669' : '1px solid #D1D5DB',
+        borderRadius: '0.5rem',
+        padding: '0.1rem 0',
+        boxShadow: 'none',
+        '&:hover': { borderColor: s.isFocused ? '#059669' : '#9CA3AF' }
+    }),
     menu: (p) => ({ ...p, zIndex: 20, backgroundColor: '#fff', border: '1px solid #D1D5DB' }),
-    option: (p, s) => ({ ...p, backgroundColor: s.isSelected ? '#3B82F6' : s.isFocused ? '#DBEAFE' : 'transparent', color: s.isSelected ? 'white' : '#111827' }),
-    menuPortal: (b) => ({ ...b, zIndex: 9999 })
+    option: (p, s) => ({
+        ...p,
+        backgroundColor: s.isSelected ? '#059669' : s.isFocused ? '#D1FAE5' : 'transparent',
+        color: s.isSelected ? 'white' : '#111827'
+    }),
+    input: (p) => ({ ...p, color: '#111827' }),
+    singleValue: (p) => ({ ...p, color: '#111827' }),
+    menuPortal: (b) => ({ ...b, zIndex: 9999 }),
 };
+
+const SESSION_STORAGE_KEY = 'stockDeliveryForm';
 
 const StockDeliveryPage = () => {
     const navigate = useNavigate();
@@ -26,12 +43,29 @@ const StockDeliveryPage = () => {
     const { createPendingDeliverable, isMutationDisabled } = usePendingDeliverables();
     const { setAppProcessing } = useLoading();
 
-    const [locationId, setLocationId] = useState('');
-    const [batchItems, setBatchItems] = useState([]);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const [formState, setFormState] = useState(() => {
+        const savedState = sessionStorage.getItem(SESSION_STORAGE_KEY);
+        return savedState ? JSON.parse(savedState) : { locationId: '', batchItems: [] };
+    });
+
+    const { locationId, batchItems } = formState;
     const [formError, setFormError] = useState('');
     const [selectedProduct, setSelectedProduct] = useState(null);
 
-    const productOptions = useMemo(() => products.map(p => ({ value: p.id, label: getProductDisplayName(p), product: p })), [products]);
+    const updateForm = (field, value) => {
+        setFormState(prev => ({ ...prev, [field]: value }));
+    };
+
+    useEffect(() => {
+        sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(formState));
+    }, [formState]);
+
+    const productOptions = useMemo(
+        () => products.map(p => ({ value: p.id, label: getProductDisplayName(p), product: p })),
+        [products]
+    );
 
     const addBatchItem = (item) => {
         // For non-serialized, check if it's already in the batch
@@ -40,32 +74,33 @@ const StockDeliveryPage = () => {
             if (existingItemIndex > -1) {
                 // Just update quantity
                 const newQuantity = batchItems[existingItemIndex].quantity + item.quantity;
-                updateBatchItem(batchItems[existingItemIndex].id, { quantity: newQuantity });
+                const updated = batchItems.map(bi =>
+                    bi.id === batchItems[existingItemIndex].id ? { ...bi, quantity: newQuantity } : bi
+                );
+                updateForm('batchItems', updated);
                 return;
             }
         }
         
         // For serialized, check if the specific inventory item is already added
-        if(item.isSerialized && batchItems.some(bi => bi.inventoryItemId === item.inventoryItemId)){
+        if (item.isSerialized && batchItems.some(bi => bi.inventoryItemId === item.inventoryItemId)) {
             return; // Already added
         }
 
-        setBatchItems(prev => [item, ...prev]);
-    };
-
-    const updateBatchItem = (id, newValues) => {
-        setBatchItems(prev => prev.map(item => item.id === id ? { ...item, ...newValues } : item));
+        updateForm('batchItems', [item, ...batchItems]);
     };
 
     const removeBatchItem = (id) => {
-        setBatchItems(prev => prev.filter(item => item.id !== id));
+        updateForm('batchItems', batchItems.filter(item => item.id !== id));
     };
     
     const handleSaveBatch = async () => {
+        if (isSubmitting) return;
+        setIsSubmitting(true);
         setFormError('');
-        if (!user) { setFormError("User profile is not loaded."); return; }
-        if (!locationId) { setFormError('Please select a delivery location.'); return; }
-        if (batchItems.length === 0) { setFormError('You must add at least one product.'); return; }
+        if (!user) { setFormError("User profile is not loaded."); setIsSubmitting(false); return; }
+        if (!locationId) { setFormError('Please select a delivery location.'); setIsSubmitting(false); return; }
+        if (batchItems.length === 0) { setFormError('You must add at least one product.'); setIsSubmitting(false); return; }
 
         setAppProcessing(true, 'Creating delivery batch...');
 
@@ -73,7 +108,7 @@ const StockDeliveryPage = () => {
             // The batchItems are already in the correct format for `itemsToDeliver`
             // Perform a final validation check
             const itemsToDeliver = batchItems.map(item => {
-                 if (item.quantity <= 0) {
+                if (item.quantity <= 0) {
                     throw new Error(`Quantity for ${item.productName} must be positive.`);
                 }
                 return {
@@ -91,7 +126,7 @@ const StockDeliveryPage = () => {
             if (itemsToDeliver.length === 0) {
                 throw new Error("No valid items to deliver.");
             }
-            
+
             // Dummy order for direct delivery
             const dummyOrder = { 
                 id: 'direct-delivery', orderNumber: 'N/A', 
@@ -100,76 +135,99 @@ const StockDeliveryPage = () => {
 
             await createPendingDeliverable(dummyOrder, itemsToDeliver, user);
 
-            setAppProcessing(false);
             alert('Delivery batch has been created successfully!');
+            sessionStorage.removeItem(SESSION_STORAGE_KEY);
+            setAppProcessing(false);
             navigate('/sales/pending-deliverables');
 
         } catch (error) {
             console.error("Error saving batch:", error);
             setFormError(`Failed to save batch: ${error.message}`);
             setAppProcessing(false);
+        } finally {
+            setIsSubmitting(false);
         } 
     };
     
     const isLoading = isUserLoading || productsLoading || locationsLoading;
     if (isLoading) return <LoadingSpinner>Loading delivery data...</LoadingSpinner>;
 
+    if (!user) {
+        return <div className="page-container flex justify-center items-center"><p className="text-red-500">Error: Could not load user profile.</p></div>;
+    }
+
     return (
-        <div className="page-container">
+        <div className="page-container mobile-form-optimized">
             <header className="page-header">
-                <h1 className="page-title">Create Stock Delivery</h1>
+                <h1 className="page-title">Deliver Stock</h1>
                 <div className="page-actions">
                     <Link to="/sales" className="btn btn-ghost"> <ChevronLeft size={20}/> Back </Link>
-                    <button onClick={handleSaveBatch} className="btn btn-primary" disabled={isMutationDisabled || batchItems.length === 0}> <Send size={18} /> Create Batch </button>
+                    <button
+                        onClick={handleSaveBatch}
+                        className="btn btn-primary"
+                        disabled={isMutationDisabled || isSubmitting}
+                    >
+                        {isSubmitting ? 'Saving...' : <><Send size={18} className="mr-2" /> Save Batch</>}
+                    </button>
                 </div>
             </header>
-            <div className="page-content md:grid md:grid-cols-2 gap-6">
-                {/* Left Column: Batch Item List */}
-                <div className="card bg-base-100 shadow-lg border">
-                    <div className="card-body">
-                        <h2 className="card-title">Delivery Batch</h2>
-                        {formError && <div className="alert alert-error text-sm p-2"><span>{formError}</span></div>}
-                        <div className="divider my-1"></div>
-                        <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
-                            {batchItems.length === 0 ? (
-                                <p className="text-center text-gray-500 py-8">Add products from the right panel.</p>
-                            ) : batchItems.map(item => (
-                                <div key={item.id} className="p-2 border rounded-lg bg-white flex justify-between items-center">
-                                    <div>
-                                        <p className="font-bold">{item.productName}</p>
-                                        <p className="text-sm text-gray-500 font-mono">{item.isSerialized ? `SN: ${item.serial}` : `QTY: ${item.quantity}`}</p>
-                                    </div>
-                                    <button onClick={() => removeBatchItem(item.id)} className="btn btn-sm btn-ghost text-red-500"><X size={18} /></button>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
+
+            <div className="page-content space-y-4">
+                {formError && <div className="alert alert-error text-sm"><span>{formError}</span></div>}
+
+                <div className="form-control">
+                    <label className="label"><span className="label-text text-lg font-bold">Select Location</span></label>
+                    <select
+                        value={locationId}
+                        onChange={(e) => updateForm('locationId', e.target.value)}
+                        className="input-base"
+                        disabled={batchItems.length > 0}
+                    >
+                        <option value="">-- Select a Location --</option>
+                        {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
+                    </select>
                 </div>
 
-                {/* Right Column: Product Selection */}
-                <div className="card bg-base-100 shadow-lg border mt-6 md:mt-0">
-                    <div className="card-body">
-                         <div className="form-control">
-                            <label className="label"><span className="label-text font-bold text-base">1. Select Delivery Location</span></label>
-                            <select value={locationId} onChange={(e) => setLocationId(e.target.value)} className="input-base" disabled={batchItems.length > 0}>
-                                <option value="">-- Select a Location --</option>
-                                {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
-                            </select>
+                <div className="form-control">
+                    <label className="label"><span className="label-text">Select Product</span></label>
+                    <Select
+                        options={productOptions}
+                        value={selectedProduct}
+                        onChange={setSelectedProduct}
+                        styles={customSelectStyles}
+                        placeholder="Search for a product..."
+                        menuPortalTarget={document.body}
+                        className="grow"
+                        isDisabled={!locationId || isMutationDisabled || isSubmitting}
+                        isClearable
+                    />
+                </div>
+
+                {selectedProduct && (
+                    <AvailableStockPanel
+                        product={selectedProduct.product}
+                        locationId={locationId}
+                        onItemSelected={addBatchItem}
+                        existingBatchItems={batchItems}
+                    />
+                )}
+
+                <div className="divider"></div>
+
+                <div className="space-y-3">
+                    {batchItems.length === 0 ? (
+                        <div className="card text-center p-4 text-gray-500">
+                            No items added yet. Select a product from stock above.
                         </div>
-                         <div className="form-control mt-4">
-                            <label className="label"><span className="label-text font-bold text-base">2. Select Product</span></label>
-                            <Select options={productOptions} value={selectedProduct} onChange={setSelectedProduct} styles={customSelectStyles} placeholder="Search for a product..." menuPortalTarget={document.body} className="flex-grow" isDisabled={!locationId} isClearable />
-                        </div>
-                        
-                        {selectedProduct && (
-                             <AvailableStockPanel 
-                                product={selectedProduct.product}
-                                locationId={locationId}
-                                onItemSelected={addBatchItem}
-                                existingBatchItems={batchItems}
+                    ) : (
+                        batchItems.map(item => (
+                            <DeliveryItemCard
+                                key={item.id}
+                                item={item}
+                                onRemove={removeBatchItem}
                             />
-                        )}
-                    </div>
+                        ))
+                    )}
                 </div>
             </div>
         </div>
@@ -249,6 +307,28 @@ const AvailableStockPanel = ({ product, locationId, onItemSelected, existingBatc
             )}
         </div>
     );
-}
+};
+
+const DeliveryItemCard = ({ item, onRemove }) => {
+    return (
+        <div className="card bg-base-100 border shadow-md" data-item-id={item.id}>
+            <div className="card-body p-3 flex justify-between items-center">
+                <div>
+                    <h3 className="font-bold text-lg">{item.productName}</h3>
+                    <p className="text-sm text-gray-600 font-mono">SKU: {item.sku}</p>
+                    <p className="text-sm text-gray-700 mt-1">
+                        {item.isSerialized ? `Serial: ${item.serial}` : `Quantity: ${item.quantity}`}
+                    </p>
+                </div>
+                <button
+                    onClick={() => onRemove(item.id)}
+                    className="btn btn-sm btn-ghost text-red-500"
+                >
+                    <X size={18} />
+                </button>
+            </div>
+        </div>
+    );
+};
 
 export default StockDeliveryPage;

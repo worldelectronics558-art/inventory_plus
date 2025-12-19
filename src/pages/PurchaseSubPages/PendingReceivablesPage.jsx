@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { usePendingReceivables } from '../../contexts/PendingReceivablesContext';
 import { useProducts } from '../../contexts/ProductContext';
 import { getProductDisplayName } from '../../utils/productUtils';
-import { ArrowLeft, Trash2, Box, User, Calendar, Hash, Plus, X, PackageCheck } from 'lucide-react';
+import { ArrowLeft, Trash2, User, Calendar, Hash, Plus, X, PackageCheck } from 'lucide-react';
 import LoadingSpinner from '../../components/LoadingOverlay';
 
 const ReceivableBatchCard = ({ batch, onDeleteBatch, onDeleteItem }) => {
@@ -34,20 +34,20 @@ const ReceivableBatchCard = ({ batch, onDeleteBatch, onDeleteItem }) => {
             </header>
 
             <ul className="p-4 space-y-3 bg-white">
-                {items.map(item => (
-                    <li key={item.id} className="bg-slate-50/70 p-3 rounded-lg border border-slate-200/80 flex items-start justify-between gap-4">
-                        <div>
+                {items.map((item, index) => (
+                    <li key={item.id || index} className="bg-slate-50/70 p-3 rounded-lg border border-slate-200/80 flex items-start justify-between gap-4">
+                        <div className="flex-grow">
                             <p className="font-semibold text-slate-800">{item.productName}</p>
-                            <p className="text-sm text-slate-500">SKU: {item.sku}</p>
+                            <p className="text-sm text-slate-500 font-mono">SKU: {item.sku}</p>
                             <p className="font-bold text-slate-800 mt-2">Quantity: {item.quantity}</p>
-                            {item.isSerialized && item.serials?.length > 0 && (
+                            {item.isSerialized && item.serials && item.serials.length > 0 && (
                                 <div className="mt-2">
                                     <p className="text-xs font-medium text-slate-600">Serials:</p>
                                     <p className="text-xs text-slate-500 mt-1 break-all">{item.serials.join(', ')}</p>
                                 </div>
                             )}
                         </div>
-                        <button onClick={() => onDeleteItem(item.id, batchId, items.length)} className="btn btn-icon text-slate-400 hover:text-red-600 hover:bg-red-50" title="Delete Item">
+                        <button onClick={() => onDeleteItem(item.id || index, batchId, items.length)} className="btn btn-icon text-slate-400 hover:text-red-600 hover:bg-red-50" title="Delete Item">
                             <X size={18} />
                         </button>
                     </li>
@@ -68,7 +68,7 @@ const EmptyState = () => (
 );
 
 const PendingReceivablesPage = () => {
-    const { pendingReceivables, isLoading: receivablesLoading, deleteReceivableBatch, removeReceivables } = usePendingReceivables();
+    const { pendingReceivables, isLoading: receivablesLoading } = usePendingReceivables();
     const { products, isLoading: productsLoading } = useProducts();
     
     const isLoading = receivablesLoading || productsLoading;
@@ -77,54 +77,45 @@ const PendingReceivablesPage = () => {
 
     const groupedAndSortedBatches = useMemo(() => {
         if (isLoading || !pendingReceivables.length) return [];
-        const grouped = pendingReceivables.reduce((acc, item) => {
-            const batchId = item.batchId;
-            if (!acc[batchId]) {
-                acc[batchId] = {
-                    batchId,
-                    items: [],
-                    receivedBy: item.createdBy?.name || 'N/A',
-                    receivedAt: item.createdAt?.toDate ? item.createdAt.toDate().toLocaleDateString() : 'N/A',
-                };
-            }
-            const product = productMap.get(item.productId);
-            acc[batchId].items.push({
-                ...item,
-                productName: product ? getProductDisplayName(product) : (item.productName || `SKU: ${item.sku}`),
-            });
-            return acc;
-        }, {});
-
-        return Object.values(grouped).sort((a, b) => b.batchId.localeCompare(a.batchId));
-
+        
+        // Each pendingReceivable document is already a batch with an items array
+        // We just need to enrich the items with product names
+        return pendingReceivables
+            .map(batch => ({
+                ...batch,
+                batchId: batch.batchId,
+                items: (batch.items || []).map(item => {
+                    const product = productMap.get(item.productId);
+                    return {
+                        ...item,
+                        id: item.id || `${batch.id}-${item.productId}-${item.sku}`, // Generate ID if missing
+                        productName: product ? getProductDisplayName(product) : (item.productName || `SKU: ${item.sku}`),
+                    };
+                }),
+                receivedBy: batch.createdBy?.name || 'N/A',
+                receivedAt: batch.createdAt?.toDate ? batch.createdAt.toDate().toLocaleDateString() : 'N/A',
+            }))
+            .sort((a, b) => b.batchId.localeCompare(a.batchId));
     }, [pendingReceivables, isLoading, productMap]);
 
     const handleDeleteBatch = useCallback(async (batchId) => {
+        // This would need to be implemented in the context
         if (window.confirm(`Are you sure you want to delete the entire batch "${batchId}"? This cannot be undone.`)) {
-            try {
-                await deleteReceivableBatch(batchId);
-            } catch (error) {
-                console.error("Failed to delete batch:", error);
-                alert(`Failed to delete batch: ${error.message}`);
-            }
+            alert('Delete batch functionality needs to be implemented in PendingReceivablesContext');
         }
-    }, [deleteReceivableBatch]);
+    }, []);
 
     const handleDeleteItem = useCallback(async (itemId, batchId, batchSize) => {
+        // This would need to be implemented in the context
         const isLastItem = batchSize === 1;
         const message = isLastItem 
             ? `This is the last item in the batch. Deleting it will remove the entire batch "${batchId}". Are you sure?`
             : `Are you sure you want to delete this item?`;
 
         if (window.confirm(message)) {
-            try {
-                await removeReceivables([itemId]);
-            } catch (error) {
-                console.error("Failed to delete item:", error);
-                alert(`Failed to delete item: ${error.message}`);
-            }
+            alert('Delete item functionality needs to be implemented in PendingReceivablesContext');
         }
-    }, [removeReceivables]);
+    }, []);
 
     if (isLoading) {
         return <LoadingSpinner>Loading pending items...</LoadingSpinner>;
@@ -153,7 +144,7 @@ const PendingReceivablesPage = () => {
                     <div className="max-w-5xl mx-auto space-y-6">
                         {groupedAndSortedBatches.map((batch) => (
                             <ReceivableBatchCard 
-                                key={batch.batchId} 
+                                key={batch.batchId || batch.id} 
                                 batch={batch} 
                                 onDeleteBatch={handleDeleteBatch} 
                                 onDeleteItem={handleDeleteItem} 

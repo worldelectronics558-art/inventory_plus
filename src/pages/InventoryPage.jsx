@@ -54,7 +54,8 @@ const InventoryPage = () => {
                 displayName: getProductDisplayName(p),
                 sku: p.sku,
                 reorderPoint: p.reorderPoint || 0,
-                totalStock: p.stockSummary?.inStock || 0,
+                // Use the canonical total stock field from stockSummary
+                totalStock: p.stockSummary?.totalInStock ?? p.stockSummary?.inStock ?? 0,
                 stockByLocation: userLocations.map(loc => ({
                     ...loc,
                     stock: p.stockSummary?.byLocation?.[loc.id] || 0
@@ -111,7 +112,6 @@ const InventoryPage = () => {
         resizable: true,
         sortable: true,
         filter: 'agTextColumnFilter',
-        suppressMenu: true,
     }), []);
 
     const exportData = (format) => {
@@ -195,7 +195,6 @@ const InventoryPage = () => {
                             defaultColDef={defaultColDef}
                             pagination={true}
                             paginationPageSize={100}
-                            rowSelection='single'
                             animateRows={true}
                             quickFilterText={searchText}
                         />

@@ -1,15 +1,15 @@
 
 // src/pages/SalesSubPages/PendingDeliverablesPage.jsx
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { usePendingDeliverables } from '../../contexts/PendingDeliverablesContext';
 import { useProducts } from '../../contexts/ProductContext';
 import { getProductDisplayName } from '../../utils/productUtils';
-import { ArrowLeft, Plus, PackageCheck, User, Calendar, Hash, Check, X } from 'lucide-react';
+import { ArrowLeft, Plus, PackageCheck, User, Calendar, Hash, Trash2 } from 'lucide-react';
 import LoadingSpinner from '../../components/LoadingOverlay';
 
-const DeliverableBatchCard = ({ batch, onFinalize }) => {
+const DeliverableBatchCard = ({ batch, onDeleteBatch }) => {
     const { batchId, items, createdBy, createdAt, customerName } = batch;
 
     const groupedItems = useMemo(() => {
@@ -37,7 +37,7 @@ const DeliverableBatchCard = ({ batch, onFinalize }) => {
         <div className="card overflow-hidden shadow-lg border-transparent hover:shadow-xl transition-shadow duration-300">
             <header className="flex justify-between items-center p-4 bg-slate-50 border-b border-slate-200">
                 <div className="flex items-center gap-3">
-                    <div className="flex-shrink-0 bg-cyan-100 text-cyan-600 rounded-lg p-2"><Hash size={20} /></div>
+                    <div className="shrink-0 bg-cyan-100 text-cyan-600 rounded-lg p-2"><Hash size={20} /></div>
                     <div>
                         <h2 className="font-bold text-lg text-cyan-800">{batchId}</h2>
                         <div className="text-xs text-slate-500 flex items-center gap-4 mt-1">
@@ -47,8 +47,9 @@ const DeliverableBatchCard = ({ batch, onFinalize }) => {
                     </div>
                 </div>
                 <div className="card-actions">
-                     <button onClick={() => onFinalize(batchId)} className="btn btn-sm btn-success btn-outline font-bold">
-                        <Check size={16} /> Finalize & Deliver
+                    <button onClick={() => onDeleteBatch(batch.batchId)} className="btn btn-sm btn-outline-danger" title="Delete Entire Batch">
+                        <Trash2 size={16} />
+                        <span className="hidden sm:inline ml-2">Delete Batch</span>
                     </button>
                 </div>
             </header>
@@ -88,36 +89,40 @@ const EmptyState = () => (
 );
 
 const PendingDeliverablesPage = () => {
-    const { pendingDeliverables, isLoading, finalizeDeliverable } = usePendingDeliverables();
+    const { pendingDeliverables, isLoading, deleteDeliverableBatch } = usePendingDeliverables();
     const { products, isLoading: productsLoading } = useProducts();
     const productMap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
 
-    const handleFinalizeBatch = async (batchId) => {
-        if (!window.confirm(`Are you sure you want to finalize and deliver batch ${batchId}? This will move the stock out of inventory.`)) return;
-        try {
-            await finalizeDeliverable(batchId);
-            alert(`Batch ${batchId} has been successfully delivered.`);
-        } catch (error) {
-            console.error("Error finalizing deliverable:", error);
-            alert(`Failed to finalize batch: ${error.message}`);
+    const handleDeleteBatch = useCallback(async (batchId) => {
+        if (window.confirm(`Are you sure you want to delete the entire batch "${batchId}"? This cannot be undone.`)) {
+            try {
+                await deleteDeliverableBatch(batchId);
+            } catch (error) {
+                console.error("Failed to delete batch:", error);
+                alert(`Failed to delete batch: ${error.message}`);
+            }
         }
-    };
+    }, [deleteDeliverableBatch]);
 
     const groupedBatches = useMemo(() => {
         if (isLoading || productsLoading) return [];
-        const grouped = pendingDeliverables.reduce((acc, item) => {
-            const batchId = item.batchId;
-            if (!acc[batchId]) {
-                acc[batchId] = { ...item, items: [] };
-            }
-            const product = productMap.get(item.productId);
-            acc[batchId].items.push({
-                ...item,
-                productName: product ? getProductDisplayName(product) : (item.productName || `SKU: ${item.sku}`),
-            });
-            return acc;
-        }, {});
-        return Object.values(grouped).sort((a, b) => b.batchId.localeCompare(a.batchId));
+
+        // Each pendingDeliverables entry is already a batch document (one per Firestore doc),
+        // mirroring the structure of pending_receivables.
+        return pendingDeliverables
+            .map(batch => ({
+                ...batch,
+                items: (batch.items || []).map(item => {
+                    const product = productMap.get(item.productId);
+                    return {
+                        ...item,
+                        productName: product
+                            ? getProductDisplayName(product)
+                            : (item.productName || `SKU: ${item.sku}`),
+                    };
+                }),
+            }))
+            .sort((a, b) => b.batchId.localeCompare(a.batchId));
     }, [pendingDeliverables, isLoading, productsLoading, productMap]);
 
     if (isLoading || productsLoading) {
@@ -141,7 +146,11 @@ const PendingDeliverablesPage = () => {
                 ) : (
                     <div className="max-w-5xl mx-auto space-y-6">
                         {groupedBatches.map((batch) => (
-                            <DeliverableBatchCard key={batch.batchId} batch={batch} onFinalize={handleFinalizeBatch} />
+                            <DeliverableBatchCard
+                                key={batch.batchId}
+                                batch={batch}
+                                onDeleteBatch={handleDeleteBatch}
+                            />
                         ))}
                     </div>
                 )}

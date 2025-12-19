@@ -33,7 +33,8 @@ const ProductDetailsPage = () => {
         return {
             productId: product.id,
             displayName: getProductDisplayName(product),
-            totalStock: product.stockSummary?.inStock || 0,
+            // Use the canonical total stock field from stockSummary
+            totalStock: product.stockSummary?.totalInStock ?? product.stockSummary?.inStock ?? 0,
             reorderPoint: product.reorderPoint || 0,
             stockByLocation: stockByLocation,
         };

@@ -137,7 +137,7 @@ const AppContent = () => {
                     <Route path="/sales/edit/:id" element={<EditSalesOrderForm />} />
                     <Route path="/sales/view/:id" element={<ViewSalesOrderPage />} />
                     <Route path="/sales/stock-delivery" element={<StockDeliveryPage />} />
-                    <Route path="/sales/finalize-order/:deliverableId" element={<FinalizeSalesOrder />} />
+                    <Route path="/sales/finalize-order/:orderId" element={<FinalizeSalesOrder />} />
                     <Route path="/sales/pending-deliverables" element={<PendingDeliverablesPage />} />
 
                     <Route path="/customers" element={<CustomersPage />} />
