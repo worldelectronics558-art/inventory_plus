@@ -68,26 +68,23 @@ const StockDeliveryPage = () => {
     );
 
     const addBatchItem = (item) => {
-        // For non-serialized, check if it's already in the batch
         if (!item.isSerialized) {
-            const existingItemIndex = batchItems.findIndex(bi => bi.productId === item.productId);
-            if (existingItemIndex > -1) {
-                // Just update quantity
-                const newQuantity = batchItems[existingItemIndex].quantity + item.quantity;
+            const existingItem = batchItems.find(bi => bi.productId === item.productId);
+            if (existingItem) {
+                const newQuantity = existingItem.quantity + item.quantity;
                 const updated = batchItems.map(bi =>
-                    bi.id === batchItems[existingItemIndex].id ? { ...bi, quantity: newQuantity } : bi
+                    bi.productId === item.productId ? { ...bi, quantity: newQuantity } : bi
                 );
                 updateForm('batchItems', updated);
                 return;
             }
         }
         
-        // For serialized, check if the specific inventory item is already added
         if (item.isSerialized && batchItems.some(bi => bi.inventoryItemId === item.inventoryItemId)) {
-            return; // Already added
+            return;
         }
 
-        updateForm('batchItems', [item, ...batchItems]);
+        updateForm('batchItems', [...batchItems, item]);
     };
 
     const removeBatchItem = (id) => {
@@ -105,29 +102,49 @@ const StockDeliveryPage = () => {
         setAppProcessing(true, 'Creating delivery batch...');
 
         try {
-            // The batchItems are already in the correct format for `itemsToDeliver`
-            // Perform a final validation check
-            const itemsToDeliver = batchItems.map(item => {
-                if (item.quantity <= 0) {
-                    throw new Error(`Quantity for ${item.productName} must be positive.`);
+            const productGroups = {};
+
+            for (const item of batchItems) {
+                if (!productGroups[item.productId]) {
+                    productGroups[item.productId] = {
+                        productName: item.productName,
+                        sku: item.sku,
+                        isSerialized: item.isSerialized,
+                        items: [],
+                        quantity: 0
+                    };
                 }
-                return {
-                    productId: item.productId,
-                    productName: item.productName,
-                    sku: item.sku,
-                    isSerialized: item.isSerialized,
-                    quantity: item.quantity,
-                    serial: item.serial || null,
-                    inventoryItemId: item.inventoryItemId,
-                    locationId: locationId // Ensure location is consistent
+                productGroups[item.productId].items.push(item);
+                productGroups[item.productId].quantity += item.quantity;
+            }
+            
+            const itemsToDeliver = Object.keys(productGroups).map(productId => {
+                const group = productGroups[productId];
+                const cleanItem = {
+                    productId: productId,
+                    productName: group.productName,
+                    sku: group.sku,
+                    isSerialized: group.isSerialized,
+                    locationId: locationId,
+                    price: 0,
+                    cost: 0,
+                    status: "PENDING",
+                    quantity: group.quantity,
                 };
+
+                if (group.isSerialized) {
+                    cleanItem.serials = group.items.map(i => i.serial);
+                    cleanItem.inventoryItemIds = group.items.map(i => i.inventoryItemId);
+                } else {
+                    cleanItem.inventoryItemId = group.items[0].inventoryItemId;
+                }
+                return cleanItem;
             });
 
             if (itemsToDeliver.length === 0) {
                 throw new Error("No valid items to deliver.");
             }
-
-            // Dummy order for direct delivery
+            
             const dummyOrder = { 
                 id: 'direct-delivery', orderNumber: 'N/A', 
                 customerName: 'Direct Delivery', customerId: null
@@ -238,17 +255,24 @@ const AvailableStockPanel = ({ product, locationId, onItemSelected, existingBatc
     const { inventoryItems: liveStock, isLoading: isStockLoading } = useLiveInventory(locationId, product.sku);
     const [quantity, setQuantity] = useState(1);
 
-    const nonSerializedStock = useMemo(() => {
-        if (product.isSerialized) return 0;
-        // Find the single inventory item for this non-serialized product at the location
-        return liveStock.length > 0 ? liveStock[0].quantity : 0;
+    const nonSerializedStockOnHand = useMemo(() => {
+        if (product.isSerialized || !liveStock.length) return 0;
+        return liveStock[0].quantity;
     }, [liveStock, product.isSerialized]);
 
+    const nonSerializedInBatch = useMemo(() => {
+        if (product.isSerialized) return 0;
+        const itemInBatch = existingBatchItems.find(item => item.productId === product.id);
+        return itemInBatch ? itemInBatch.quantity : 0;
+    }, [existingBatchItems, product.id, product.isSerialized]);
+
+    const availableToSelect = nonSerializedStockOnHand - nonSerializedInBatch;
+    
     const handleAddNonSerialized = () => {
-        if (quantity > nonSerializedStock || quantity <= 0) return;
+        if (quantity > availableToSelect || quantity <= 0) return;
         
         onItemSelected({
-            id: `${liveStock[0].id}-${quantity}`, // Temp ID
+            id: product.id, 
             inventoryItemId: liveStock[0].id,
             productId: product.id,
             sku: product.sku,
@@ -262,17 +286,21 @@ const AvailableStockPanel = ({ product, locationId, onItemSelected, existingBatc
 
     const handleAddSerialized = (stockItem) => {
         onItemSelected({
-            id: stockItem.id, // Use inventory item ID as unique ID
+            id: stockItem.id, 
             inventoryItemId: stockItem.id,
             productId: product.id,
             sku: product.sku,
             productName: getProductDisplayName(product),
             isSerialized: true,
-            serial: stockItem.serial,
+            serial: stockItem.serial, // Use singular 'serial' for an individual unit
             quantity: 1,
             locationId: locationId,
         });
     };
+
+    useEffect(() => {
+        setQuantity(1);
+    }, [product.id]);
 
     if (isStockLoading) return <div className="text-center p-4"><span className="loading loading-spinner"></span></div>;
 
@@ -292,16 +320,29 @@ const AvailableStockPanel = ({ product, locationId, onItemSelected, existingBatc
                         </div>
                     )})}
                 </div>
-            ) : ( // Non-Serialized UI
+            ) : ( 
                 <div className="mt-2">
-                     <p className='text-sm mb-2'>Available Quantity: <span className='font-bold'>{nonSerializedStock}</span></p>
-                    {nonSerializedStock > 0 ? (
+                     <p className='text-sm mb-2'>Available to add: <span className='font-bold'>{availableToSelect}</span> / {nonSerializedStockOnHand}</p>
+                    {availableToSelect > 0 ? (
                         <div className="flex items-center gap-2">
-                            <input type="number" value={quantity} onChange={e => setQuantity(Math.max(1, Number(e.target.value)))} className="input input-bordered w-24" max={nonSerializedStock} min={1}/>
-                            <button onClick={handleAddNonSerialized} className="btn btn-primary" disabled={quantity <= 0 || quantity > nonSerializedStock}><Plus size={16}/> Add to Batch</button>
+                            <input 
+                                type="number" 
+                                value={quantity} 
+                                onChange={e => setQuantity(Math.max(1, Number(e.target.value)))} 
+                                className="input input-bordered w-24" 
+                                max={availableToSelect} 
+                                min={1}
+                            />
+                            <button 
+                                onClick={handleAddNonSerialized} 
+                                className="btn btn-primary" 
+                                disabled={quantity <= 0 || quantity > availableToSelect}
+                            >
+                                <Plus size={16}/> Add to Batch
+                            </button>
                         </div>
                     ) : (
-                        <p className='text-sm text-red-500'>Out of stock.</p>
+                        <p className='text-sm text-red-500'>This item is fully batched or out of stock.</p>
                     )}
                 </div>
             )}
@@ -317,6 +358,7 @@ const DeliveryItemCard = ({ item, onRemove }) => {
                     <h3 className="font-bold text-lg">{item.productName}</h3>
                     <p className="text-sm text-gray-600 font-mono">SKU: {item.sku}</p>
                     <p className="text-sm text-gray-700 mt-1">
+                        {/* Correctly display the serial for an individual serialized item */}
                         {item.isSerialized ? `Serial: ${item.serial}` : `Quantity: ${item.quantity}`}
                     </p>
                 </div>

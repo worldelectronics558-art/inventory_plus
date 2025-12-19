@@ -50,9 +50,9 @@ const DashboardPage = () => {
     return (
         <div className="min-h-screen bg-gray-100">
             <h1 className="text-3xl font-bold mb-6 text-gray-800">👋 Welcome to InventoryPlus</h1>
-            <p className="text-gray-600 mb-4">
+            <h2 className="text-gray-600 mb-4">
                 Here is a real-time overview of your inventory metrics.
-            </p>
+            </h2>
             <div className="p-4 bg-blue-100 border border-blue-400 rounded-lg mb-6">
                 <p className="font-semibold text-blue-800">
                     <span className="font-bold">Auth Status:</span> Ready. 

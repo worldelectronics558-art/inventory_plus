@@ -2,7 +2,7 @@
 // src/pages/SalesSubPages/PendingDeliverablesPage.jsx
 
 import React, { useMemo, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { usePendingDeliverables } from '../../contexts/PendingDeliverablesContext';
 import { useProducts } from '../../contexts/ProductContext';
 import { getProductDisplayName } from '../../utils/productUtils';
@@ -137,8 +137,9 @@ const PendingDeliverablesPage = () => {
                     <h1 className="page-title">Pending Stock Deliveries</h1>
                 </div>
                 <div className="page-actions">
-                    <Link to="/sales/create-delivery" className="btn btn-primary"><Plus size={20}/> Create Direct Delivery</Link>
+                    <Link to="/sales/stock-delivery" className="btn btn-secondary"><Plus size={20}/> Create Delivery</Link>
                 </div>
+                
             </header>
             <main className="page-content">
                 {groupedBatches.length === 0 ? (

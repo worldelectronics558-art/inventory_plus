@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { doc, runTransaction, collection, serverTimestamp, increment } from 'firebase/firestore';
@@ -28,7 +27,6 @@ const FinalizeSalesOrder = () => {
     const navigate = useNavigate();
     const { orderId } = useParams();
 
-    // --- Hooks ---
     const { db, appId, userId, authReady } = useAuth();
     const { currentUser, isLoading: isUserLoading } = useUser();
     const { salesOrders, isLoading: ordersLoading, setMutationDisabled, isMutationDisabled } = useSalesOrders();
@@ -37,39 +35,25 @@ const FinalizeSalesOrder = () => {
     const { locations, isLoading: locationsLoading } = useLocations();
     const { setAppProcessing } = useLoading();
 
-    // --- State ---
     const [error, setError] = useState('');
     const [selectedStock, setSelectedStock] = useState({});
     const [openBatches, setOpenBatches] = useState(new Set());
 
-    // --- Memoized Data ---
     const isLoading = !authReady || isUserLoading || ordersLoading || deliverablesLoading || productsLoading || locationsLoading;
     
-    // Find the sales order by ID
-    const salesOrderForDisplay = useMemo(() => {
-        return salesOrders.find(so => so.id === orderId);
-    }, [salesOrders, orderId]);
-
+    const salesOrderForDisplay = useMemo(() => salesOrders.find(so => so.id === orderId), [salesOrders, orderId]);
     const productMap = useMemo(() => products.reduce((acc, p) => ({ ...acc, [p.id]: p, [p.sku]: p }), {}), [products]);
     const locationMap = useMemo(() => locations.reduce((acc, loc) => ({ ...acc, [loc.id]: loc.name }), {}), [locations]);
 
-    // Find all delivery batches matching this sales order - match by salesOrderId OR by product IDs
     const relevantDeliveryBatches = useMemo(() => {
         if (!salesOrderForDisplay || !pendingDeliverables.length) return {};
-        
         const orderProductIds = new Set(salesOrderForDisplay.items?.map(item => item.productId) || []);
         
-        // Filter batches that either match the sales order ID OR have matching product IDs
         const relevantBatches = pendingDeliverables.filter(batch => {
-            // If batch has a salesOrderId that matches, include it
-            if (batch.salesOrderId === salesOrderForDisplay.id) {
-                return true;
-            }
-            // Otherwise, check if any items match the order's products
+            if (batch.salesOrderId === salesOrderForDisplay.id) return true;
             return batch.items?.some(item => orderProductIds.has(item.productId));
         });
 
-        // Group and flatten similar to FinalizePurchaseInvoice
         const grouped = relevantBatches.reduce((acc, batch) => {
             const batchId = batch.batchId;
             if (!acc[batchId]) {
@@ -77,39 +61,51 @@ const FinalizeSalesOrder = () => {
                     items: [],
                     createdBy: batch.createdBy?.name || 'N/A',
                     createdAt: batch.createdAt?.toDate ? batch.createdAt.toDate().toLocaleDateString() : 'N/A',
-                    id: batch.id
+                    id: batch.id,
                 };
             }
 
             batch.items.forEach(item => {
-                // Only include items that match the order's products
                 if (!orderProductIds.has(item.productId)) return;
-
                 const productInfo = productMap[item.productId] || {};
-                const commonData = {
-                    ...item,
-                    id: `${batch.id}-${item.productId}-${item.inventoryItemId || item.serial || item.quantity}`,
-                    productName: getProductDisplayName(productInfo),
-                    locationName: locationMap[item.locationId] || 'Unknown Location',
-                    originalDeliverableId: batch.id,
-                    batchId: batchId,
-                };
 
-                acc[batchId].items.push(commonData);
+                if (item.isSerialized && item.serials) {
+                    item.serials.forEach((serial, index) => {
+                        const inventoryItemId = item.inventoryItemIds?.[index];
+                        if (!inventoryItemId) return; 
+
+                        acc[batchId].items.push({
+                            ...item,
+                            id: `${batch.id}-${inventoryItemId}`,
+                            productName: getProductDisplayName(productInfo),
+                            locationName: locationMap[item.locationId] || 'Unknown',
+                            originalDeliverableId: batch.id,
+                            batchId: batchId,
+                            serial: serial,
+                            inventoryItemId: inventoryItemId,
+                            quantity: 1,
+                        });
+                    });
+                } else if (!item.isSerialized) {
+                    acc[batchId].items.push({
+                        ...item,
+                        id: `${batch.id}-${item.inventoryItemId}`,
+                        productName: getProductDisplayName(productInfo),
+                        locationName: locationMap[item.locationId] || 'Unknown',
+                        originalDeliverableId: batch.id,
+                        batchId: batchId,
+                    });
+                }
             });
-
             return acc;
         }, {});
 
         return Object.keys(grouped).sort().reverse().reduce((obj, key) => {
-            if (grouped[key].items.length > 0) {
-                obj[key] = grouped[key];
-            }
+            if (grouped[key].items.length > 0) obj[key] = grouped[key];
             return obj;
         }, {});
     }, [salesOrderForDisplay, pendingDeliverables, productMap, locationMap]);
 
-    // Fulfillment summary for order items
     const fulfillmentSummary = useMemo(() => {
         const summary = {};
         if (!salesOrderForDisplay) return summary;
@@ -137,6 +133,7 @@ const FinalizeSalesOrder = () => {
         const currentSelection = selectedStock[item.id]?.quantity || 0;
         const maxSelectable = summary.needed - (summary.selected - currentSelection);
         const newQty = Math.max(0, Math.min(qty, item.quantity, maxSelectable));
+        
         setSelectedStock(prev => {
             const next = { ...prev };
             if (newQty > 0) { 
@@ -151,26 +148,19 @@ const FinalizeSalesOrder = () => {
     const toggleBatch = (batchId) => {
         setOpenBatches(prev => {
             const next = new Set(prev);
-            if (next.has(batchId)) { 
-                next.delete(batchId); 
-            } else { 
-                next.add(batchId); 
-            }
+            if (next.has(batchId)) next.delete(batchId); 
+            else next.add(batchId);
             return next;
         });
     };
 
-    // --- Main Transaction Logic ---
     const handleFinalizeDelivery = useCallback(async () => {
         setError('');
         const selectedUnits = Object.values(selectedStock).map(sel => ({ ...sel.item, quantity: sel.quantity }));
 
-        if (selectedUnits.length === 0) {
-            setError('No items have been selected for delivery.');
-            return;
-        }
-        if (!userId || !currentUser) { setError('User data not available. Please try again.'); return; }
-        if (!db || !appId || !salesOrderForDisplay) { setError('Critical data is missing. Please refresh and try again.'); return; }
+        if (selectedUnits.length === 0) { setError('No items have been selected for delivery.'); return; }
+        if (!userId || !currentUser) { setError('User data not available.'); return; }
+        if (!db || !appId || !salesOrderForDisplay) { setError('Critical data is missing.'); return; }
 
         setAppProcessing(true, 'Finalizing delivery...');
         setMutationDisabled(true);
@@ -183,33 +173,20 @@ const FinalizeSalesOrder = () => {
                 const productsCollectionRef = collection(db, `artifacts/${appId}/products`);
                 const deliverablesCollectionRef = collection(db, `artifacts/${appId}/pending_deliverables`);
 
-                // --- PHASE 1: READS ---
                 const soDoc = await transaction.get(soRef);
-                if (!soDoc.exists()) throw new Error("Sales order not found. It may have been deleted.");
+                if (!soDoc.exists()) throw new Error("Sales order not found.");
 
-                const inventoryItemIds = [...new Set(selectedUnits.map(u => u.inventoryItemId))];
-                const productIds = [...new Set(selectedUnits.map(u => u.productId))];
+                const inventoryItemIds = [...new Set(selectedUnits.map(u => u.inventoryItemId).filter(Boolean))];
                 const deliverableIds = [...new Set(selectedUnits.map(u => u.originalDeliverableId))];
-
-                const inventoryDocsPromise = inventoryItemIds.map(id => transaction.get(doc(db, `artifacts/${appId}/inventory_items`, id)));
-                const deliverableDocsPromise = deliverableIds.map(id => transaction.get(doc(deliverablesCollectionRef, id)));
-
-                const [inventoryDocs, deliverableDocs] = await Promise.all([Promise.all(inventoryDocsPromise), Promise.all(deliverableDocsPromise)]);
                 
-                const inventoryDataMap = inventoryDocs.reduce((acc, doc) => {
-                    if (doc.exists()) acc[doc.id] = doc.data();
-                    return acc;
-                }, {});
+                const inventoryDocs = await Promise.all(inventoryItemIds.map(id => transaction.get(doc(db, `artifacts/${appId}/inventory_items`, id))));
+                const deliverableDocs = await Promise.all(deliverableIds.map(id => transaction.get(doc(deliverablesCollectionRef, id))));
 
-                const deliverablesData = deliverableDocs.reduce((acc, doc) => {
-                    if (doc.exists()) acc[doc.id] = doc.data();
-                    return acc;
-                }, {});
+                const inventoryDataMap = inventoryDocs.reduce((acc, doc) => doc.exists() ? ({...acc, [doc.id]: doc.data()}) : acc, {});
+                const deliverablesData = deliverableDocs.reduce((acc, doc) => doc.exists() ? ({...acc, [doc.id]: doc.data()}) : acc, {});
 
-                // --- PHASE 2: PROCESS & PREPARE WRITES ---
                 const salesOrderData = soDoc.data();
                 const updatedSoItems = JSON.parse(JSON.stringify(salesOrderData.items));
-
                 const stockSummaryUpdates = new Map();
                 const deliverableUpdates = new Map();
 
@@ -219,12 +196,12 @@ const FinalizeSalesOrder = () => {
                     if (invItemData.status !== 'in_stock') throw new Error(`Stock for ${unit.productName} (${unit.serial || 'N/A'}) is no longer available.`);
                     
                     const deliverableData = deliverablesData[unit.originalDeliverableId];
-                    if (!deliverableData) throw new Error(`Deliverable batch ${unit.originalDeliverableId} could not be found.`);
+                    if (!deliverableData) throw new Error(`Deliverable batch ${unit.originalDeliverableId} not found.`);
+
+                    const soItemForPrice = updatedSoItems.find(i => i.productId === unit.productId);
+                    const unitSalePrice = soItemForPrice?.unitSalePrice || 0;
 
                     const invItemRef = doc(db, `artifacts/${appId}/inventory_items`, unit.inventoryItemId);
-                    const soItemForPrice = updatedSoItems.find(i => i.productId === unit.productId);
-
-                    // 1. Prepare Inventory Item Update
                     const deliveryDetails = {
                         finalizedBy: { uid: userId, name: currentUser.displayName || 'N/A' },
                         finalizedAt: serverTimestamp(),
@@ -237,7 +214,7 @@ const FinalizeSalesOrder = () => {
                     if (unit.isSerialized) {
                         transaction.update(invItemRef, { status: 'delivered', deliveryDetails });
                     } else {
-                        if (invItemData.quantity < unit.quantity) throw new Error(`Not enough quantity for ${unit.productName}. Available: ${invItemData.quantity}, Needed: ${unit.quantity}.`);
+                        if (invItemData.quantity < unit.quantity) throw new Error(`Not enough quantity for ${unit.productName}.`);
                         const newQuantity = invItemData.quantity - unit.quantity;
                         transaction.update(invItemRef, { 
                             quantity: newQuantity, 
@@ -246,50 +223,26 @@ const FinalizeSalesOrder = () => {
                         });
                     }
 
-                    // 2. Prepare Sales Record Creation
                     transaction.set(doc(salesRecordsRef), {
-                        productId: unit.productId,
-                        productName: unit.productName,
-                        quantity: unit.quantity,
-                        isSerialized: unit.isSerialized,
-                        serial: unit.serial || null,
-                        salesOrderId: salesOrderForDisplay.id,
-                        salesOrderNumber: salesOrderForDisplay.orderNumber,
-                        customerId: salesOrderData.customerId,
-                        customerName: salesOrderData.customerName,
-                        locationId: unit.locationId,
-                        unitSalePrice: soItemForPrice?.unitSalePrice || 0,
-                        unitCostPrice: invItemData.unitCostPrice || 0,
-                        finalizedAt: serverTimestamp(),
-                        finalizedBy: { uid: userId, name: currentUser.displayName || 'N/A' },
-                        appId: appId,
+                        productId: unit.productId, productName: unit.productName, quantity: unit.quantity,
+                        isSerialized: unit.isSerialized, serial: unit.serial || null, salesOrderId: salesOrderForDisplay.id,
+                        salesOrderNumber: salesOrderForDisplay.orderNumber, customerId: salesOrderData.customerId,
+                        customerName: salesOrderData.customerName, locationId: unit.locationId,
+                        unitSalePrice: unitSalePrice, unitCostPrice: invItemData.unitCostPrice || 0,
+                        finalizedAt: serverTimestamp(), finalizedBy: { uid: userId, name: currentUser.displayName || 'N/A' }, appId: appId,
                     });
 
-                    // 3. Prepare History Log Creation
                     transaction.set(doc(historyCollectionRef), {
-                        type: "STOCK_DELIVERED",
-                        timestamp: serverTimestamp(),
-                        user: { uid: userId, name: currentUser.displayName || 'N/A' },
-                        inventoryItemId: unit.inventoryItemId,
-                        productId: unit.productId,
-                        sku: unit.sku,
-                        serial: unit.serial || null,
-                        quantity: unit.quantity,
-                        locationId: unit.locationId,
-                        context: {
-                            type: "SALES_ORDER",
-                            documentId: salesOrderForDisplay.id,
-                            documentNumber: salesOrderForDisplay.orderNumber,
-                            customerId: salesOrderData.customerId,
-                            customerName: salesOrderData.customerName
-                        }
+                        type: "STOCK_DELIVERED", timestamp: serverTimestamp(), user: { uid: userId, name: currentUser.displayName || 'N/A' },
+                        inventoryItemId: unit.inventoryItemId, productId: unit.productId, sku: unit.sku,
+                        serial: unit.serial || null, quantity: unit.quantity, locationId: unit.locationId, unitSalePrice: unitSalePrice,
+                        context: { type: "SALES_ORDER", documentId: salesOrderForDisplay.id, documentNumber: salesOrderForDisplay.orderNumber,
+                            customerId: salesOrderData.customerId, customerName: salesOrderData.customerName }
                     });
 
-                    // 4. Aggregate Sales Order and Deliverable Updates
                     const soItemToUpdate = updatedSoItems.find(i => i.productId === unit.productId);
                     if (soItemToUpdate) soItemToUpdate.deliveredQty = (soItemToUpdate.deliveredQty || 0) + unit.quantity;
 
-                    // Aggregate updates for pending deliverables
                     if (!deliverableUpdates.has(unit.originalDeliverableId)) {
                         deliverableUpdates.set(unit.originalDeliverableId, {
                             doc: deliverableData,
@@ -297,41 +250,46 @@ const FinalizeSalesOrder = () => {
                         });
                     }
                     const batchUpdate = deliverableUpdates.get(unit.originalDeliverableId);
-                    if (!batchUpdate.itemUpdates.has(unit.inventoryItemId)) {
-                        batchUpdate.itemUpdates.set(unit.inventoryItemId, { qtyTaken: 0 });
+                    if (!batchUpdate.itemUpdates.has(unit.productId)) {
+                        batchUpdate.itemUpdates.set(unit.productId, { qtyTaken: 0, serialsTaken: [], price: unitSalePrice });
                     }
-                    const itemUpdate = batchUpdate.itemUpdates.get(unit.inventoryItemId);
+                    const itemUpdate = batchUpdate.itemUpdates.get(unit.productId);
                     itemUpdate.qtyTaken += unit.quantity;
-                    
-                    // Aggregate updates for product stock summaries
+                    if(unit.isSerialized) itemUpdate.serialsTaken.push(unit.serial);
+
                     if (!stockSummaryUpdates.has(unit.productId)) {
                         stockSummaryUpdates.set(unit.productId, { qtyChange: 0, locationChanges: new Map() });
                     }
                     const stockUpdate = stockSummaryUpdates.get(unit.productId);
                     stockUpdate.qtyChange -= unit.quantity;
-                    const locChanges = stockUpdate.locationChanges;
-                    locChanges.set(unit.locationId, (locChanges.get(unit.locationId) || 0) - unit.quantity);
+                    stockUpdate.locationChanges.set(unit.locationId, (stockUpdate.locationChanges.get(unit.locationId) || 0) - unit.quantity);
                 }
 
-                // --- PHASE 3: APPLY AGGREGATED WRITES ---
-
-                // Update Pending Deliverables
                 for (const [id, update] of deliverableUpdates.entries()) {
                     const deliverableRef = doc(deliverablesCollectionRef, id);
-                    const originalItems = update.doc.items;
-
-                    const newItems = originalItems.map(item => {
-                        const itemUpdate = update.itemUpdates.get(item.inventoryItemId);
+                    const newItems = update.doc.items.map(item => {
+                        const itemUpdate = update.itemUpdates.get(item.productId);
                         if (!itemUpdate) return item;
 
-                        if (item.isSerialized) {
-                            // For serialized, if qtyTaken equals quantity, remove the item
-                            return itemUpdate.qtyTaken >= item.quantity ? null : item;
+                        const newItem = {...item, price: itemUpdate.price};
+                        if (newItem.isSerialized) {
+                            const serialsTakenSet = new Set(itemUpdate.serialsTaken);
+                            const newSerials = [];
+                            const newInventoryItemIds = [];
+                            newItem.serials.forEach((s, i) => {
+                                if(!serialsTakenSet.has(s)){
+                                    newSerials.push(s);
+                                    newInventoryItemIds.push(newItem.inventoryItemIds[i]);
+                                }
+                            });
+                            newItem.serials = newSerials;
+                            newItem.inventoryItemIds = newInventoryItemIds;
+                            newItem.quantity = newSerials.length;
                         } else {
-                            const newQuantity = item.quantity - itemUpdate.qtyTaken;
-                            return newQuantity > 0 ? { ...item, quantity: newQuantity } : null;
+                            newItem.quantity -= itemUpdate.qtyTaken;
                         }
-                    }).filter(item => item !== null);
+                        return newItem.quantity > 0 ? newItem : null;
+                    }).filter(Boolean);
 
                     if (newItems.length > 0) {
                         transaction.update(deliverableRef, { items: newItems });
@@ -340,7 +298,6 @@ const FinalizeSalesOrder = () => {
                     }
                 }
 
-                // Update Product Summaries
                 for (const [productId, update] of stockSummaryUpdates.entries()) {
                     const productRef = doc(productsCollectionRef, productId);
                     const updates = { 'stockSummary.totalInStock': increment(update.qtyChange) };
@@ -350,7 +307,6 @@ const FinalizeSalesOrder = () => {
                     transaction.update(productRef, updates);
                 }
 
-                // Update Sales Order
                 const isFullyDelivered = updatedSoItems.every(item => item.deliveredQty >= item.quantity);
                 transaction.update(soRef, {
                     items: updatedSoItems,
