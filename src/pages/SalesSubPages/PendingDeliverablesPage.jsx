@@ -2,6 +2,7 @@ import React, { useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePendingDeliverables } from '../../contexts/PendingDeliverablesContext';
 import { useProducts } from '../../contexts/ProductContext';
+import { useLocations } from '../../contexts/LocationContext';
 import { getProductDisplayName } from '../../utils/productUtils';
 import { Trash2, User, Calendar, Hash, Plus, PackageCheck, X } from 'lucide-react';
 import LoadingSpinner from '../../components/LoadingOverlay';
@@ -21,8 +22,6 @@ const DeliverableBatchCard = ({ batch, onDeleteBatch, onDeleteItem }) => {
                         <div className="text-xs text-slate-500 flex flex-wrap items-center gap-x-4 gap-y-1 mt-1">
                             <span className="flex items-center gap-1.5"><User size={12} /> {createdBy?.name}</span>
                             <span className="flex items-center gap-1.5"><Calendar size={12} /> {createdAt}</span>
-                            <span className="font-medium text-emerald-600">Order: {salesOrderNumber}</span>
-                            <span className="font-medium text-slate-700">Customer: {customerName}</span>
                         </div>
                     </div>
                 </div>
@@ -44,9 +43,9 @@ const DeliverableBatchCard = ({ batch, onDeleteBatch, onDeleteItem }) => {
                         <div className="flex-grow">
                             <p className="font-semibold text-slate-800">{item.productName}</p>
                             <p className="text-sm text-slate-500 font-mono">SKU: {item.sku}</p>
+                            <p className="font-bold text-slate-800 mt-2">Location: {item.locationName}</p>
                             <p className="font-bold text-slate-800 mt-2">Quantity: {item.quantity}</p>
                             
-                            {/* UPDATED: Check for plural 'serials' array to match StockDeliveryPage logic */}
                             {item.isSerialized && item.serials && item.serials.length > 0 && (
                                 <div className="mt-2 bg-white/50 p-2 rounded border border-slate-100">
                                     <p className="text-xs font-medium text-slate-600 uppercase tracking-wider">Selected Serials:</p>
@@ -82,12 +81,13 @@ const EmptyState = () => (
 
 const PendingDeliverablesPage = () => {
     const navigate = useNavigate();
-    // Destructure error if you want to display it, otherwise keep as is
     const { pendingDeliverables, isLoading: deliverablesLoading, deleteDeliverableBatch, error } = usePendingDeliverables();
     const { products, isLoading: productsLoading } = useProducts();
+    const { locations, isLoading: locationsLoading } = useLocations();
     
-    const isLoading = deliverablesLoading || productsLoading;
+    const isLoading = deliverablesLoading || productsLoading || locationsLoading;
     const productMap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
+    const locationMap = useMemo(() => new Map(locations.map(l => [l.id, l.name])), [locations]);
 
     const groupedAndSortedBatches = useMemo(() => {
         if (isLoading || !pendingDeliverables.length) return [];
@@ -97,19 +97,19 @@ const PendingDeliverablesPage = () => {
                 ...batch,
                 items: (batch.items || []).map(item => {
                     const product = productMap.get(item.productId);
+                    const locationName = locationMap.get(item.locationId) || 'Unknown Location';
                     return {
                         ...item,
                         productName: product ? getProductDisplayName(product) : (item.productName || `SKU: ${item.sku}`),
+                        locationName: locationName,
                     };
                 }),
-                // Standardizing date conversion from Firestore Timestamp
                 displayDate: batch.createdAt?.seconds 
                     ? new Date(batch.createdAt.seconds * 1000).toLocaleDateString() 
                     : 'Pending...',
             }))
-            // Sort by createdAt timestamp descending (newest first)
             .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-    }, [pendingDeliverables, isLoading, productMap]);
+    }, [pendingDeliverables, isLoading, productMap, locationMap]);
 
     const handleDeleteBatch = useCallback(async (batchId) => {
         if (window.confirm(`Are you sure you want to delete delivery batch "${batchId}"? This will return units to stock selection.`)) {
@@ -129,7 +129,6 @@ const PendingDeliverablesPage = () => {
 
     return (
         <div className="page-container">
-            {/* Optional Error Alert */}
             {error && (
                 <div className="alert alert-error mb-4 shadow-sm">
                     <span>Error: {error.message}</span>
@@ -159,7 +158,6 @@ const PendingDeliverablesPage = () => {
                         {groupedAndSortedBatches.map((batch) => (
                             <DeliverableBatchCard 
                                 key={batch.id} 
-                                // Pass displayDate to the card
                                 batch={{...batch, createdAt: batch.displayDate}} 
                                 onDeleteBatch={handleDeleteBatch} 
                                 onDeleteItem={handleDeleteItem} 

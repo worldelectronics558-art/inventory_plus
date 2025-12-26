@@ -313,61 +313,77 @@ const FinalizePurchaseInvoice = () => {
                     </div>
                 </div>
                 <div className="lg:col-span-3 mt-6 md:mt-0">
-                    <div className="card bg-white p-4 border">
-                        <h2 className="card-title mb-4">Select from Pending Received Stock</h2>
+                    <div className="card bg-white p-4 border shadow-sm">
+                        <h2 className="card-title text-md mb-4 flex items-center gap-2">
+                            <Package size={20} className="text-indigo-500" /> Select from Pending Received Stock
+                        </h2>
+                        
                         {Object.keys(relevantBatches).length === 0 ? (
-                            <div className="text-center text-gray-500 py-8 flex flex-col items-center">
-                                <AlertTriangle size={24} className="text-yellow-500 mb-2" />
+                            <div className="text-center text-gray-500 py-10 flex flex-col items-center">
+                                <AlertTriangle size={32} className="text-yellow-500 mb-2" />
                                 <p className="font-semibold">No Matching Stock Found</p>
                                 <p className="text-sm">There are no pending received items that match this purchase invoice.</p>
                             </div>
                         ) : (
-                            <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-2">
+                            <div className="space-y-3">
                                 {Object.entries(relevantBatches).map(([batchId, batch]) => {
                                     const isOpen = openBatches.has(batchId);
                                     return (
-                                    <div key={batch.id} className="border rounded-lg bg-white shadow-sm">
-                                        <header onClick={() => toggleBatch(batchId)} className="p-3 flex justify-between items-center cursor-pointer hover:bg-gray-50">
-                                            <div className="flex flex-col">
-                                                <span className="font-bold text-gray-800">{batchId}</span>
+                                    <div key={batch.id} className="border rounded-lg overflow-hidden">
+                                        <header onClick={() => toggleBatch(batchId)} className="bg-gray-50 p-3 flex justify-between items-center cursor-pointer hover:bg-gray-100">
+                                            <div>
+                                                <p className="font-bold text-gray-700 text-sm">{batchId}</p>
                                                 <span className="text-xs text-gray-500">Received by {batch.receivedBy} on {batch.receivedAt}</span>
                                             </div>
-                                            <ChevronDown size={20} className={`transition-transform transform ${isOpen ? 'rotate-180' : ''}`} />
+                                            <ChevronDown size={18} className={`transition-transform transform ${isOpen ? 'rotate-180' : ''}`} />
                                         </header>
                                         {isOpen && (
-                                            <ul className="divide-y divide-gray-100 p-1">
+                                            <ul className="divide-y">
                                                 {batch.items.map(item => {
                                                     const selection = selectedStock[item.id];
-                                                    const isSelected = !!selection;
+                                                    const isSelected = item.isSerialized ? !!selection : (!!selection && selection.quantity > 0);
                                                     const summary = fulfillmentSummary[item.sku] || { needed: 0, selected: 0 };
-                                                    const maxAdd = summary.needed - (summary.selected - (isSelected ? selection.quantity : 0));
+                                                    const currentSelectionQty = isSelected ? selection.quantity : 0;
+                                                    const maxAdd = summary.needed - (summary.selected - currentSelectionQty);
                                                     const isDisabled = maxAdd <= 0 && !isSelected;
-                                                    if (item.isSerialized) {
-                                                        return (
-                                                            <li key={item.id} onClick={() => !isDisabled && handleQuantityChange(item, isSelected ? 0 : 1)} 
-                                                                className={`flex items-center p-2 rounded-md ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-indigo-50'} ${isSelected ? 'bg-green-100 font-semibold' : ''}`}>
-                                                                <div className="mr-3">{isSelected ? <CheckSquare className="text-green-600"/> : <Square className="text-gray-400"/>}</div>
-                                                                <Package size={20} className="mr-4 text-gray-500"/>
-                                                                <div className="flex-grow">
-                                                                    <p>{item.productName}</p>
-                                                                    <p className="text-xs text-gray-500 font-mono">Serial: {item.serial}</p>
-                                                                </div>
-                                                                {isDisabled && !isSelected && <span className="badge badge-sm badge-warning ml-2">Not Needed</span>}
-                                                            </li>
-                                                        );
-                                                    }
+
                                                     return (
-                                                        <li key={item.id} className={`flex items-center p-2 rounded-md ${isDisabled && !isSelected ? 'opacity-50' : ''} ${isSelected ? 'bg-green-100' : ''}`}>
-                                                            <Package size={20} className="mr-4 text-gray-500"/>
-                                                            <div className="flex-grow">
-                                                                <p>{item.productName}</p>
-                                                                <p className="text-xs text-gray-600">Available Qty: {item.quantity}</p>
+                                                        <li key={item.id} className={`p-3 flex items-center justify-between ${isSelected ? 'bg-blue-50' : ''} ${isDisabled ? 'opacity-50' : ''}`}>
+                                                            <div className="flex items-center gap-3">
+                                                                <div 
+                                                                    onClick={() => item.isSerialized && !isDisabled && handleQuantityChange(item, isSelected ? 0 : 1)} 
+                                                                    className={item.isSerialized ? 'cursor-pointer' : ''}
+                                                                >
+                                                                    {isSelected ? <CheckSquare className="text-blue-600" /> : <Square className="text-gray-300" />}
+                                                                </div>
+                                                                <div>
+                                                                    <p className="text-sm font-medium">{item.productName}</p>
+                                                                    <p className="text-xs text-gray-400">SKU: {item.sku}</p>
+                                                                    <p className="text-xs text-gray-400">Location: {item.locationName}</p>
+                                                                    {item.serial && <p className="text-xs font-mono text-blue-600 mt-1">S/N: {item.serial}</p>}
+                                                                </div>
                                                             </div>
-                                                            <div className="flex items-center gap-2">
-                                                                <button disabled={isDisabled || !isSelected} onClick={() => handleQuantityChange(item, (selection?.quantity || 0) - 1)}><MinusCircle size={18}/></button>
-                                                                <input type="number" value={selection?.quantity || 0} onChange={e => handleQuantityChange(item, parseInt(e.target.value, 10) || 0)} className="input input-bordered input-xs w-16 text-center" disabled={isDisabled} max={Math.min(item.quantity, maxAdd)} />
-                                                                <button disabled={isDisabled || (selection?.quantity || 0) >= item.quantity} onClick={() => handleQuantityChange(item, (selection?.quantity || 0) + 1)}><PlusCircle size={18}/></button>
-                                                            </div>
+
+                                                            {!item.isSerialized ? (
+                                                                <div className="flex items-center gap-2">
+                                                                    <button className="btn btn-ghost btn-xs" onClick={() => handleQuantityChange(item, (selection?.quantity || 0) - 1)} disabled={!isSelected}>
+                                                                        <MinusCircle size={18}/>
+                                                                    </button>
+                                                                    <input 
+                                                                        type="number" 
+                                                                        value={selection?.quantity || 0} 
+                                                                        onChange={e => handleQuantityChange(item, parseInt(e.target.value) || 0)}
+                                                                        className="input input-bordered input-xs w-16 text-center"
+                                                                        max={Math.min(item.quantity, maxAdd)}
+                                                                        disabled={isDisabled && !isSelected}
+                                                                    />
+                                                                    <button className="btn btn-ghost btn-xs" onClick={() => handleQuantityChange(item, (selection?.quantity || 0) + 1)} disabled={isDisabled || (selection?.quantity || 0) >= item.quantity || (selection?.quantity || 0) >= maxAdd}>
+                                                                        <PlusCircle size={18}/>
+                                                                    </button>
+                                                                </div>
+                                                            ) : (
+                                                                isDisabled && !isSelected && <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded">Not Needed</span>
+                                                            )}
                                                         </li>
                                                     );
                                                 })}

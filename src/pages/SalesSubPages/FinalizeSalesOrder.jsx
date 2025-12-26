@@ -231,15 +231,14 @@ const FinalizeSalesOrder = () => {
     }, [db, appId, userId, currentUser, orderId, selectedStock, navigate, setAppProcessing, setIsMutationDisabled]);
 
     
-        // --- Data Preparation for UI ---
         const relevantBatches = useMemo(() => {
             if (!salesOrderForDisplay || !pendingDeliverables) return {};
             const orderSkus = new Set(salesOrderForDisplay.items.map(item => item.sku));
-    
+
             return pendingDeliverables.reduce((acc, batch) => {
                 const relevantItemsInBatch = batch.items.filter(item => orderSkus.has(item.sku));
                 if (relevantItemsInBatch.length === 0) return acc;
-    
+
                 const bId = batch.batchId || batch.id;
                 if (!acc[bId]) {
                     acc[bId] = {
@@ -249,7 +248,7 @@ const FinalizeSalesOrder = () => {
                         items: []
                     };
                 }
-    
+
                 relevantItemsInBatch.forEach(item => {
                     const productInfo = productMap[item.productId] || {};
                     const locationId = item.locationId;
@@ -261,7 +260,7 @@ const FinalizeSalesOrder = () => {
                         originalDeliverableDocId: batch.id,
                         locationId: locationId,
                     };
-    
+
                     if (item.isSerialized) {
                         item.serials.forEach((sn, idx) => {
                             acc[bId].items.push({
@@ -273,23 +272,24 @@ const FinalizeSalesOrder = () => {
                             });
                         });
                     } else {
-                        // --- THE FIX IS HERE ---
-                        // This logic is now more robust. It prioritizes the `inventoryItemIds` array as the source of truth.
-    
-                        // If the array exists and has items, unroll each ID into a selectable unit.
-                        // This correctly handles the scenario after a partial finalization.
                         if (item.inventoryItemIds && item.inventoryItemIds.length > 0) {
-                            item.inventoryItemIds.forEach(invId => {
+                            // 1. Count occurrences of each inventoryItemId
+                            const counts = item.inventoryItemIds.reduce((countAcc, invId) => {
+                                countAcc[invId] = (countAcc[invId] || 0) + 1;
+                                return countAcc;
+                            }, {});
+
+                            // 2. Create one UI item for each unique inventoryItemId with the correct quantity
+                            for (const [invId, qty] of Object.entries(counts)) {
                                 acc[bId].items.push({
                                     ...common,
-                                    id: `${batch.id}-${item.productId}-${invId}`,
-                                    quantity: 1, // Each is a separate selectable item of quantity 1
+                                    id: `${batch.id}-${item.productId}-${invId}`, // This is now unique
+                                    quantity: qty, // This is the total available quantity
                                     inventoryItemId: invId
                                 });
-                            });
+                            }
                         } 
-                        // Only fall back to the single `inventoryItemId` field for legacy data that does not have the array.
-                        else if (item.inventoryItemId) {
+                        else if (item.inventoryItemId) { // Fallback for legacy data
                             acc[bId].items.push({
                                 ...common,
                                 id: `${batch.id}-${item.productId}`,
@@ -299,10 +299,12 @@ const FinalizeSalesOrder = () => {
                         }
                     }
                 });
-    
+
                 return acc;
             }, {});
         }, [salesOrderForDisplay, pendingDeliverables, productMap, locationMap]);
+        // --- Data Preparation for UI ---
+                
 
     useEffect(() => {
         const keys = Object.keys(relevantBatches);
@@ -444,7 +446,8 @@ const FinalizeSalesOrder = () => {
                                                                 </div>
                                                                 <div>
                                                                     <p className="text-sm font-medium">{item.productName}</p>
-                                                                    <p className="text-xs text-gray-400">{item.locationName} • SKU: {item.sku}</p>
+                                                                    <p className="text-xs text-gray-400">SKU: {item.sku}</p>
+                                                                    <p className="text-xs text-gray-400">Location: {item.locationName}</p>
                                                                     {item.serial && <p className="text-xs font-mono text-blue-600 mt-1">S/N: {item.serial}</p>}
                                                                 </div>
                                                             </div>

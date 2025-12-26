@@ -1,8 +1,8 @@
-
 import React, { useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { usePendingReceivables } from '../../contexts/PendingReceivablesContext';
 import { useProducts } from '../../contexts/ProductContext';
+import { useLocations } from '../../contexts/LocationContext';
 import { getProductDisplayName } from '../../utils/productUtils';
 import { ArrowLeft, Trash2, User, Calendar, Hash, Plus, X, PackageCheck } from 'lucide-react';
 import LoadingSpinner from '../../components/LoadingOverlay';
@@ -39,6 +39,7 @@ const ReceivableBatchCard = ({ batch, onDeleteBatch, onDeleteItem }) => {
                         <div className="flex-grow">
                             <p className="font-semibold text-slate-800">{item.productName}</p>
                             <p className="text-sm text-slate-500 font-mono">SKU: {item.sku}</p>
+                            <p className="font-bold text-slate-800 mt-2">Location: {item.locationName}</p>
                             <p className="font-bold text-slate-800 mt-2">Quantity: {item.quantity}</p>
                             {item.isSerialized && item.serials && item.serials.length > 0 && (
                                 <div className="mt-2">
@@ -70,33 +71,35 @@ const EmptyState = () => (
 const PendingReceivablesPage = () => {
     const { pendingReceivables, isLoading: receivablesLoading } = usePendingReceivables();
     const { products, isLoading: productsLoading } = useProducts();
+    const { locations, isLoading: locationsLoading } = useLocations();
     
-    const isLoading = receivablesLoading || productsLoading;
+    const isLoading = receivablesLoading || productsLoading || locationsLoading;
 
     const productMap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
+    const locationMap = useMemo(() => new Map(locations.map(l => [l.id, l.name])), [locations]);
 
     const groupedAndSortedBatches = useMemo(() => {
         if (isLoading || !pendingReceivables.length) return [];
         
-        // Each pendingReceivable document is already a batch with an items array
-        // We just need to enrich the items with product names
         return pendingReceivables
             .map(batch => ({
                 ...batch,
                 batchId: batch.batchId,
                 items: (batch.items || []).map(item => {
                     const product = productMap.get(item.productId);
+                    const locationName = locationMap.get(item.locationId) || 'Unknown Location';
                     return {
                         ...item,
-                        id: item.id || `${batch.id}-${item.productId}-${item.sku}`, // Generate ID if missing
+                        id: item.id || `${batch.id}-${item.productId}-${item.sku}`,
                         productName: product ? getProductDisplayName(product) : (item.productName || `SKU: ${item.sku}`),
+                        locationName: locationName,
                     };
                 }),
                 receivedBy: batch.createdBy?.name || 'N/A',
                 receivedAt: batch.createdAt?.toDate ? batch.createdAt.toDate().toLocaleDateString() : 'N/A',
             }))
             .sort((a, b) => b.batchId.localeCompare(a.batchId));
-    }, [pendingReceivables, isLoading, productMap]);
+    }, [pendingReceivables, isLoading, productMap, locationMap]);
 
     const handleDeleteBatch = useCallback(async (batchId) => {
         // This would need to be implemented in the context
