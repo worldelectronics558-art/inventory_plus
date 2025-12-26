@@ -108,7 +108,6 @@ const FinalizeSalesOrder = () => {
                         throw new Error(`Insufficient stock for ${unit.productName}`);
                     }
 
-                    // THE FIX: Correctly determine the new status based on whether the item is serialized or not.
                     const newQuantity = invItemData.quantity - unit.quantity;
                     let newStatus = 'in_stock';
                     if (newQuantity <= 0) {
@@ -117,7 +116,7 @@ const FinalizeSalesOrder = () => {
 
                     transaction.update(doc(inventoryCollectionRef, unit.inventoryItemId), {
                         quantity: increment(-unit.quantity),
-                        status: newStatus, // Use the new, correct status
+                        status: newStatus,
                         deliveryDetails: arrayUnion({
                             salesOrderId: orderId,
                             quantity: unit.quantity,
@@ -188,11 +187,18 @@ const FinalizeSalesOrder = () => {
                                 if (itemToUpdate.inventoryItemIds) itemToUpdate.inventoryItemIds.splice(serialIndex, 1);
                             }
                         } else {
+                            // --- THE FIX ---
+                            // This section ensures stale data is never left behind in the batch document.
                             if (itemToUpdate.inventoryItemIds) {
                                 const idIndex = itemToUpdate.inventoryItemIds.indexOf(unit.inventoryItemId);
                                 if (idIndex > -1) {
                                     itemToUpdate.inventoryItemIds.splice(idIndex, 1);
                                 }
+                            }
+                            // If the legacy field matches the ID we just used, update it
+                            // to point to the next available ID, or null if none are left.
+                            if (itemToUpdate.inventoryItemId === unit.inventoryItemId) {
+                                 itemToUpdate.inventoryItemId = itemToUpdate.inventoryItemIds && itemToUpdate.inventoryItemIds.length > 0 ? itemToUpdate.inventoryItemIds[0] : null;
                             }
                         }
                     }
@@ -226,51 +232,28 @@ const FinalizeSalesOrder = () => {
 
     
         // --- Data Preparation for UI ---
-            // --- Data Preparation for UI ---
-    const relevantBatches = useMemo(() => {
-        if (!salesOrderForDisplay || !pendingDeliverables) return {};
-        const orderSkus = new Set(salesOrderForDisplay.items.map(item => item.sku));
-
-        return pendingDeliverables.reduce((acc, batch) => {
-            const bId = batch.batchId || batch.id;
-            const preparedBy = batch.createdBy?.name || 'N/A';
-            const itemsForThisBatch = [];
-
-            // CASE 1: The batch document is for SERIALIZED items
-            if (batch.isSerialized) {
-                if (orderSkus.has(batch.sku)) {
-                    const productInfo = Object.values(productMap).find(p => p.sku === batch.sku) || {};
-                    const locationId = batch.locationId; // Get location from the top level of the batch
-
-                    const common = {
-                        productId: productInfo.id,
-                        sku: batch.sku,
-                        isSerialized: true,
-                        productName: getProductDisplayName(productInfo),
-                        locationName: locationMap[locationId] || 'Unknown',
-                        originalDeliverableDocId: batch.id,
-                        locationId: locationId,
+        const relevantBatches = useMemo(() => {
+            if (!salesOrderForDisplay || !pendingDeliverables) return {};
+            const orderSkus = new Set(salesOrderForDisplay.items.map(item => item.sku));
+    
+            return pendingDeliverables.reduce((acc, batch) => {
+                const relevantItemsInBatch = batch.items.filter(item => orderSkus.has(item.sku));
+                if (relevantItemsInBatch.length === 0) return acc;
+    
+                const bId = batch.batchId || batch.id;
+                if (!acc[bId]) {
+                    acc[bId] = {
+                        id: bId,
+                        docId: batch.id,
+                        preparedBy: batch.createdBy?.name || 'N/A',
+                        items: []
                     };
-
-                    batch.serials.forEach((sn, idx) => {
-                        itemsForThisBatch.push({
-                            ...common,
-                            id: `${batch.id}-${sn}`,
-                            quantity: 1,
-                            serial: sn,
-                            inventoryItemId: batch.inventoryItemIds[idx]
-                        });
-                    });
                 }
-            }
-            // CASE 2: The batch document is for NON-SERIALIZED items
-            else {
-                const relevantItems = batch.items.filter(item => orderSkus.has(item.sku));
-
-                relevantItems.forEach(item => {
+    
+                relevantItemsInBatch.forEach(item => {
                     const productInfo = productMap[item.productId] || {};
-                    const locationId = item.locationId; // Get location from the item level
-
+                    const locationId = item.locationId;
+                    
                     const common = {
                         ...item,
                         productName: getProductDisplayName(productInfo),
@@ -278,39 +261,48 @@ const FinalizeSalesOrder = () => {
                         originalDeliverableDocId: batch.id,
                         locationId: locationId,
                     };
-
-                    if (item.inventoryItemIds && item.inventoryItemIds.length > 1 && item.quantity > 1) {
-                        item.inventoryItemIds.forEach(invId => {
-                            itemsForThisBatch.push({
+    
+                    if (item.isSerialized) {
+                        item.serials.forEach((sn, idx) => {
+                            acc[bId].items.push({
                                 ...common,
-                                id: `${batch.id}-${item.productId}-${invId}`,
+                                id: `${batch.id}-${sn}`,
                                 quantity: 1,
-                                inventoryItemId: invId
+                                serial: sn,
+                                inventoryItemId: item.inventoryItemIds[idx]
                             });
                         });
                     } else {
-                        const inventoryItemId = item.inventoryItemId || (item.inventoryItemIds && item.inventoryItemIds[0]);
-                        itemsForThisBatch.push({
-                            ...common,
-                            id: `${batch.id}-${item.productId}`,
-                            inventoryItemId: inventoryItemId,
-                        });
+                        // --- THE FIX IS HERE ---
+                        // This logic is now more robust. It prioritizes the `inventoryItemIds` array as the source of truth.
+    
+                        // If the array exists and has items, unroll each ID into a selectable unit.
+                        // This correctly handles the scenario after a partial finalization.
+                        if (item.inventoryItemIds && item.inventoryItemIds.length > 0) {
+                            item.inventoryItemIds.forEach(invId => {
+                                acc[bId].items.push({
+                                    ...common,
+                                    id: `${batch.id}-${item.productId}-${invId}`,
+                                    quantity: 1, // Each is a separate selectable item of quantity 1
+                                    inventoryItemId: invId
+                                });
+                            });
+                        } 
+                        // Only fall back to the single `inventoryItemId` field for legacy data that does not have the array.
+                        else if (item.inventoryItemId) {
+                            acc[bId].items.push({
+                                ...common,
+                                id: `${batch.id}-${item.productId}`,
+                                quantity: item.quantity,
+                                inventoryItemId: item.inventoryItemId,
+                            });
+                        }
                     }
                 });
-            }
-
-            if (itemsForThisBatch.length > 0) {
-                acc[bId] = {
-                    id: bId,
-                    docId: batch.id,
-                    preparedBy: preparedBy,
-                    items: itemsForThisBatch
-                };
-            }
-            return acc;
-        }, {});
-    }, [salesOrderForDisplay, pendingDeliverables, productMap, locationMap]);
-      
+    
+                return acc;
+            }, {});
+        }, [salesOrderForDisplay, pendingDeliverables, productMap, locationMap]);
 
     useEffect(() => {
         const keys = Object.keys(relevantBatches);

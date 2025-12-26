@@ -132,17 +132,19 @@ export const ProductProvider = ({ children }) => {
     // ... (CRUD implementations (createProduct, updateProduct, deleteProduct) remain the same, 
     // relying on the ensureOnline guard) ...
 
-    const createProduct = async (productData) => {
+    const createProduct = async (productData, skuID) => {
         if (!ensureOnline("create a new product")) return; 
         try {
-            const colRef = getProductCollectionRef();
-            const newProductRef = doc(colRef);
-            await setDoc(newProductRef, {
+            // Use the provided skuID as the document name
+            const productDocRef = doc(getProductCollectionRef(), skuID);
+            
+            await setDoc(productDocRef, {
                 ...productData,
+                id: skuID, // Redundant but helpful for local state mapping
                 createdAt: serverTimestamp(),
                 updatedAt: serverTimestamp(),
             });
-            return newProductRef.id;
+            return skuID;
         } catch (error) {
             console.error("Error creating product:", error);
             throw error;
@@ -152,6 +154,7 @@ export const ProductProvider = ({ children }) => {
     const updateProduct = async (productId, updateData) => {
         if (!ensureOnline("edit a product")) return; 
         try {
+            // productId here will now be the SKU string
             const productDocRef = doc(getProductCollectionRef(), productId);
             await updateDoc(productDocRef, {
                 ...updateData,
@@ -166,6 +169,7 @@ export const ProductProvider = ({ children }) => {
     const deleteProduct = async (productId) => {
         if (!ensureOnline("delete a product")) return; 
         try {
+            // productId here will now be the SKU string
             const productDocRef = doc(getProductCollectionRef(), productId);
             await deleteDoc(productDocRef);
         } catch (error) {

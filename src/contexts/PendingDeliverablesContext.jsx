@@ -62,7 +62,6 @@ export const PendingDeliverablesProvider = ({ children }) => {
                     uid: userId, 
                     name: deliveringUser.displayName || 'N/A' 
                 },
-                // Clean mapping to ensure SKU and ID are explicitly saved
                 items: items.map(item => ({
                     productId: item.productId, 
                     sku: item.sku || '',
@@ -70,11 +69,13 @@ export const PendingDeliverablesProvider = ({ children }) => {
                     quantity: Number(item.quantity),
                     isSerialized: !!item.isSerialized,
                     status: 'PENDING',
+                    locationId: item.locationId, // THE FIX IS HERE
                     ...(item.isSerialized ? {
                         serials: item.serials || [],
                         inventoryItemIds: item.inventoryItemIds || []
                     } : {
-                        inventoryItemId: item.inventoryItemId || null
+                        inventoryItemId: item.inventoryItemId || null,
+                        inventoryItemIds: item.inventoryItemIds || []
                     })
                 }))
             };
@@ -89,6 +90,7 @@ export const PendingDeliverablesProvider = ({ children }) => {
             setIsMutationDisabled(false);
         }
     };
+
 
     // 3. Deletion logic
     const deleteDeliverableBatch = async (batchId) => {

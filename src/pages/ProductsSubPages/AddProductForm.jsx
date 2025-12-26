@@ -24,6 +24,25 @@ const AddProductForm = () => {
     });
 
     const [errors, setErrors] = useState({});
+    const handleSkuChange = (e) => {
+        const value = e.target.value;
+        // Regex: Alphanumeric, hyphen, and underscore only
+        const skuRegex = /^[a-zA-Z0-9-_]*$/;
+    
+        if (skuRegex.test(value)) {
+            setFormData({ ...formData, sku: value });
+            // Clear the SKU error specifically if the input is now valid
+            if (errors.sku) {
+                setErrors(prev => ({ ...prev, sku: '' }));
+            }
+        } else {
+            // Set the SKU error inside the existing errors object
+            setErrors(prev => ({ 
+                ...prev, 
+                sku: 'Spaces and special characters are not allowed in SKU.' 
+            }));
+        }
+    };
     const [status, setStatus] = useState({ loading: false, error: !isOnline ? 'Cannot add product in Offline Mode.' : null });
     const [newLookupType, setNewLookupType] = useState(null);
 
@@ -64,10 +83,13 @@ const AddProductForm = () => {
         if (!formData.category.trim()) newErrors.category = 'Category is required.';
         if (isNaN(formData.reorderPoint) || formData.reorderPoint < 0) newErrors.reorderPoint = 'Reorder Point must be a number >= 0.';
 
-        const skuToCheck = formData.sku.trim();
-        const existingProduct = products.find(p => p.sku.toLowerCase() === skuToCheck.toLowerCase());
+        // Sanitize SKU for use as Document ID
+        const skuID = formData.sku.trim().toUpperCase();
+        
+        // Check for duplicates in local state before attempting save
+        const existingProduct = products.find(p => p.id === skuID || p.sku.toUpperCase() === skuID);
         if (existingProduct) {
-            newErrors.sku = `SKU "${skuToCheck}" already exists for product: ${existingProduct.model}. SKU must be unique.`;
+            newErrors.sku = `SKU "${skuID}" already exists for product: ${existingProduct.model}.`;
         }
 
         if (Object.keys(newErrors).length > 0) {
@@ -82,18 +104,21 @@ const AddProductForm = () => {
         try {
             const productDataToSave = {
                 ...formData,
-                sku: skuToCheck,
+                sku: skuID, // Saved as uppercase for consistency
                 reorderPoint: parseInt(formData.reorderPoint, 10),
-                isSerialized: formData.isSerialized, // Ensure this is saved
+                isSerialized: formData.isSerialized,
+                stockSummary: { totalInStock: 0, byLocation: {} } // Initialize stock fields
             };
 
-            await createProduct(productDataToSave);
+            // We pass skuID as the intended document ID
+            await createProduct(productDataToSave, skuID); 
+            
             setStatus({ loading: false, error: null });
             alert('Product added successfully!');
             navigate('/products');
         } catch (error) {
             console.error("Firestore Save Error:", error);
-            setStatus({ loading: false, error: error.message || 'Failed to save product. Check console for details.' });
+            setStatus({ loading: false, error: error.message || 'Failed to save product.' });
         }
     };
 
@@ -117,8 +142,16 @@ const AddProductForm = () => {
                     {/* SKU, Model, Brand, Category, Description fields... */}
                     <div>
                         <label htmlFor="sku" className="block text-sm font-medium text-gray-700 mb-1">SKU *</label>
-                        <input type="text" id="sku" name="sku" value={formData.sku} onChange={handleChange} disabled={isDisabled} className={`input-base ${errors.sku ? 'border-red-500' : ''}`} />
-                        {errors.sku && <p className="error-message">{errors.sku}</p>}
+                        <input 
+                        type="text" 
+                        id="sku" 
+                        name="sku" 
+                        value={formData.sku} 
+                        onChange={handleSkuChange} 
+                        disabled={isDisabled} 
+                        className={`input-base ${errors.sku ? 'border-red-500' : ''}`} 
+                        />
+                        {errors.sku && <p className="text-red-500 text-xs mt-1">{errors.sku}</p>}
                     </div>
 
                     <div>

@@ -124,30 +124,38 @@ const ProductsImportForm = () => {
         const tempNewBrands = new Set();
         const tempNewCategories = new Set();
         const skuSet = new Set(existingProductsList.map(p => p.sku.toLowerCase()));
+        const skuRegex = /^[a-zA-Z0-9-_]+$/;
 
         dataRows.forEach((row, rowIndex) => {
-            if (row.every(cell => cell === null || cell === undefined || cell === '')) {
-                return;
-            }
-
+            if (row.every(cell => cell === null || cell === undefined || cell === '')) return;
+    
             const mappedProduct = {};
             let isValid = true;
             const lineNumber = rowIndex + 2;
-
+    
             headers.forEach((header, colIndex) => {
                 const value = row[colIndex];
                 const fieldDef = FIELD_VALIDATION[header];
-
+    
                 if (!fieldDef) {
                     const mappedKey = FIELD_MAPPING[header] || header.toLowerCase();
                     mappedProduct[mappedKey] = value != null ? value.toString().trim() : '';
                     return;
                 }
-
+    
                 if (fieldDef.mandatory && (value === null || value === undefined || value.toString().trim() === '')) {
                     validationErrors.push(`Row ${lineNumber}, Column "${header}": Value is required.`);
                     isValid = false;
                     return;
+                }
+    
+                // --- SKU VALIDATION LOGIC ---
+                if (header === 'SKU' && value) {
+                    const skuValue = value.toString().trim();
+                    if (!skuRegex.test(skuValue)) {
+                        validationErrors.push(`Row ${lineNumber}, SKU "${skuValue}": Spaces and special characters are not allowed (use only letters, numbers, '-' or '_').`);
+                        isValid = false;
+                    }
                 }
 
                 if (value != null && value !== '') {
@@ -217,29 +225,31 @@ const ProductsImportForm = () => {
             const batch = writeBatch(db);
             const productColRef = getProductCollectionRef();
 
+            // 1. Handle Lookup Updates (Brands/Categories)
             if (newLookups.brands.length > 0 || newLookups.categories.length > 0) {
                 const lookupDocRef = doc(db, `/artifacts/${appId}/lookups`, 'metadata');
                 const updates = {};
-                if (newLookups.brands.length > 0) {
-                    updates.brands = arrayUnion(...newLookups.brands);
-                }
-                if (newLookups.categories.length > 0) {
-                    updates.categories = arrayUnion(...newLookups.categories);
-                }
+                if (newLookups.brands.length > 0) updates.brands = arrayUnion(...newLookups.brands);
+                if (newLookups.categories.length > 0) updates.categories = arrayUnion(...newLookups.categories);
+                
                 if (Object.keys(updates).length > 0) {
                     batch.update(lookupDocRef, updates);
                 }
             }
 
+            // 2. Import Products using SKU as Document ID
             fileData.forEach(item => {
-                const newProductRef = doc(productColRef);
+                // CHANGE: Use item.sku as the document ID
+                const newProductRef = doc(productColRef, item.sku);
+                
                 const safeReorderPoint = typeof item.reorderPoint === 'number' && !isNaN(item.reorderPoint) ? item.reorderPoint : 0;
 
                 batch.set(newProductRef, {
                     ...item,
+                    id: item.sku, // Explicitly include id for consistency with the rest of the app
                     reorderPoint: safeReorderPoint,
-                    isSerialized: item.isSerialized || false, // Ensure boolean value
-                    stockSummary: { totalInStock: 0, byLocation: {} }, // Initialize stock summary
+                    isSerialized: item.isSerialized || false,
+                    stockSummary: { totalInStock: 0, byLocation: {} },
                     createdAt: serverTimestamp(),
                     updatedAt: serverTimestamp(),
                 });

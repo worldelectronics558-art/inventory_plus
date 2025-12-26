@@ -147,10 +147,15 @@ const ProductsPage = () => {
 
     const productToDelete = products.find(p => p.id === productId);
 
-    const hasInventoryHistory = productToDelete?.stockSummary?.byLocation && Object.keys(productToDelete.stockSummary.byLocation).length > 0;
+    // Check inventory history across all locations
+    const hasInventoryHistory = productToDelete?.stockSummary?.byLocation && 
+                                Object.values(productToDelete.stockSummary.byLocation).some(qty => qty !== 0);
+    
+    // Also check if total stock is not zero just to be safe
+    const totalStock = productToDelete?.stockSummary?.totalInStock || 0;
 
-    if (hasInventoryHistory) {
-        alert(`Cannot delete product SKU: ${sku}. This product has an inventory history and cannot be deleted.`);
+    if (hasInventoryHistory || totalStock > 0) {
+        alert(`Cannot delete product ${sku}. This product has stock or inventory history.`);
         return;
     }
 
@@ -171,7 +176,12 @@ const ProductsPage = () => {
     let currentProducts = productsWithStock;
     if (searchText) {
       const lowerSearch = searchText.toLowerCase();
-      currentProducts = currentProducts.filter(p => Object.values(p).some(val => String(val).toLowerCase().includes(lowerSearch)));
+      currentProducts = currentProducts.filter(p => 
+        p.sku.toLowerCase().includes(lowerSearch) || 
+        p.model.toLowerCase().includes(lowerSearch) ||
+        p.brand.toLowerCase().includes(lowerSearch) ||
+        (p.description && p.description.toLowerCase().includes(lowerSearch))
+      );
     }
     if (activeFilters.length > 0) {
       currentProducts = currentProducts.filter(p => activeFilters.every(f => p[getProductKeyFromFilterKey(f.key)] === f.value));

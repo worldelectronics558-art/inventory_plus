@@ -71,25 +71,34 @@ const StockDeliveryPage = () => {
 
     // Add item to the UI list
     const addBatchItem = (item) => {
+        // For non-serialized items, check if we can merge with an existing item for the same product.
         if (!item.isSerialized) {
-            // Merge quantities for non-serialized
             const existingItem = batchItems.find(bi => bi.productId === item.productId);
+            
             if (existingItem) {
                 const newQuantity = existingItem.quantity + item.quantity;
+                // THE FIX: Correctly concatenate the inventoryItemIds arrays from both items.
+                const newInventoryItemIds = (existingItem.inventoryItemIds || []).concat(item.inventoryItemIds || []);
+                
                 const updated = batchItems.map(bi =>
-                    bi.productId === item.productId ? { ...bi, quantity: newQuantity } : bi
+                    bi.productId === item.productId 
+                        ? { ...bi, quantity: newQuantity, inventoryItemIds: newInventoryItemIds } 
+                        : bi
                 );
                 updateForm('batchItems', updated);
-                return;
+                return; // Stop after merging
             }
-        } else {
-            // Prevent duplicate serialized items
+        } 
+        // For serialized items, prevent adding the same serial twice.
+        else {
             if (batchItems.some(bi => bi.inventoryItemId === item.inventoryItemId)) {
                 return;
             }
         }
+        // If it's a new item (or a new non-serialized product), add it to the list.
         updateForm('batchItems', [...batchItems, item]);
     };
+
 
     const removeBatchItem = (id) => {
         updateForm('batchItems', batchItems.filter(item => item.id !== id));
@@ -108,24 +117,23 @@ const StockDeliveryPage = () => {
         setAppProcessing(true, 'Creating delivery batch...');
 
         try {
-            const productGroups = {};
-
-            // Group items by product to handle quantities and serials
-            for (const item of batchItems) {
-                if (!productGroups[item.productId]) {
-                    productGroups[item.productId] = {
+            // This groups all selected items by their product ID to consolidate them.
+            const productGroups = batchItems.reduce((acc, item) => {
+                if (!acc[item.productId]) {
+                    acc[item.productId] = {
                         productName: item.productName,
                         sku: item.sku,
                         isSerialized: item.isSerialized,
-                        items: [], 
+                        items: [],
                         totalQuantity: 0
                     };
                 }
-                productGroups[item.productId].items.push(item);
-                productGroups[item.productId].totalQuantity += item.quantity;
-            }
+                acc[item.productId].items.push(item);
+                acc[item.productId].totalQuantity += item.quantity;
+                return acc;
+            }, {});
             
-            // Create the final payload to be saved
+            // This maps the grouped data into the final format for saving.
             const itemsToDeliver = Object.keys(productGroups).map(productId => {
                 const group = productGroups[productId];
                 
@@ -134,8 +142,6 @@ const StockDeliveryPage = () => {
                     productName: group.productName,
                     sku: group.sku,
                     isSerialized: group.isSerialized,
-                    // THE FIX: Use the 'locationId' directly from the component's state,
-                    // just like in the working StockReceivePage.jsx file.
                     locationId: locationId,
                     status: "PENDING",
                     quantity: group.totalQuantity,
@@ -147,8 +153,13 @@ const StockDeliveryPage = () => {
                     payloadItem.serials = group.items.map(i => i.serial); 
                     payloadItem.inventoryItemIds = group.items.map(i => i.inventoryItemId);
                 } else {
-                    payloadItem.inventoryItemIds = group.items.map(i => i.inventoryItemId);
-                    payloadItem.inventoryItemId = group.items[0].inventoryItemId;
+                    // --- THE FIX IS HERE ---
+                    // This now correctly gathers the inventoryItemIds from the items in the group.
+                    const allInventoryItemIds = group.items.flatMap(i => i.inventoryItemIds || []);
+                    
+                    payloadItem.inventoryItemIds = allInventoryItemIds;
+                    // We also set the legacy field to the first ID for backward compatibility.
+                    payloadItem.inventoryItemId = allInventoryItemIds.length > 0 ? allInventoryItemIds[0] : null;
                     payloadItem.serials = [];
                 }
 
@@ -174,8 +185,6 @@ const StockDeliveryPage = () => {
             setIsSubmitting(false);
         }
     };
-
-
     
     const isLoading = isUserLoading || productsLoading || locationsLoading;
     if (isLoading) return <LoadingSpinner>Loading delivery data...</LoadingSpinner>;
@@ -283,23 +292,50 @@ const AvailableStockPanel = ({ product, locationId, onItemSelected, existingBatc
     const availableToSelect = nonSerializedStockOnHand - nonSerializedInBatch;
     
     const handleAddNonSerialized = () => {
-        if (quantity > availableToSelect || quantity <= 0) return;
+        if (quantity <= 0 || quantity > availableToSelect) return;
+
+        // This new logic correctly gathers all inventory document IDs needed to fulfill the quantity,
+        // respecting the FIFO order of the liveStock from the useLiveInventory hook.
+        let quantityToGather = quantity;
+        const idsToBatch = [];
         
-        // When adding non-serialized, we use the first matching document ID as a reference
-        // but because we now pass multiple inventoryItemIds in the payload (above),
-        // the backend can perform FIFO deduction across all documents.
+        for (const stockDoc of liveStock) {
+            if (quantityToGather === 0) break;
+
+            // Determine how much of this stockDoc is already in the batch UI
+            const alreadyBatchedQty = existingBatchItems
+                .filter(bi => bi.productId === product.id)
+                .flatMap(bi => bi.inventoryItemIds || [])
+                .filter(id => id === stockDoc.id)
+                .length;
+
+            const availableInDoc = stockDoc.quantity - alreadyBatchedQty;
+            const canTakeFromDoc = Math.min(quantityToGather, availableInDoc);
+
+            if (canTakeFromDoc > 0) {
+                // Add the doc ID once for each unit of quantity we are taking.
+                for (let i = 0; i < canTakeFromDoc; i++) {
+                    idsToBatch.push(stockDoc.id);
+                }
+                quantityToGather -= canTakeFromDoc;
+            }
+        }
+
+        // This payload is now correct, with an array of all required inventory IDs.
         onItemSelected({
-            id: `ns_${product.id}`, 
-            inventoryItemId: liveStock[0].id, // Reference ID
+            id: `ns_${product.id}_${Date.now()}`,
             productId: product.id,
             sku: product.sku,
             productName: getProductDisplayName(product),
             isSerialized: false,
-            quantity: quantity,
+            quantity: quantity, // The total quantity being added in this action
             locationId: locationId,
+            inventoryItemIds: idsToBatch, // The correct array of all doc IDs
         });
+
         setQuantity(1);
     };
+
 
     const handleAddSerialized = (stockItem) => {
         onItemSelected({
