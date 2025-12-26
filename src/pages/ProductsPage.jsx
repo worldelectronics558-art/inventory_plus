@@ -1,9 +1,9 @@
-// src/pages/ProductsPage.jsx
 
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProducts } from '../contexts/ProductContext';
 import { useLookups } from '../contexts/LookupContext';
+import { PackagePlus, ListFilterPlus, ChevronDown, FileDown } from 'lucide-react';
 
 // Responsive & UI Components
 import useMediaQuery from '../hooks/useMediaQuery';
@@ -59,19 +59,17 @@ const OdooSearchBar = ({ searchText, setSearchText, activeFilters, onFilterToggl
     if (!activeFilters.some(f => f.key === filterOption.key && f.value === filterOption.value)) {
       onFilterToggle(filterOption);
     }
-    // Keep menu open for multiple filter selections
   };
   
   const handleKeyDown = (event) => {
     if (event.key === 'Enter') {
       setIsMenuOpen(false);
-      inputRef.current.blur(); // Remove focus from the input field
+      inputRef.current.blur();
     }
   };
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      // Close only if clicking outside the search bar and filter menu container
       if (searchRef.current && !searchRef.current.contains(event.target)) {
         setIsMenuOpen(false);
       }
@@ -81,76 +79,52 @@ const OdooSearchBar = ({ searchText, setSearchText, activeFilters, onFilterToggl
   }, [searchRef]);
 
   return (
-    <div className="relative w-full" ref={searchRef}>
-      <div className="flex flex-wrap gap-2 mb-2">
-        {activeFilters.map((filter, index) => (
-          <span key={index} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
-            {filter.label}
-            <button type="button" className="shrink-0 ml-1.5 h-4 w-4 rounded-full inline-flex items-center justify-center text-indigo-400 hover:bg-indigo-200 hover:text-indigo-500 focus:outline-none focus:bg-indigo-500 focus:text-white" onClick={() => onFilterRemove(filter)}>
-              <span className="sr-only">Remove filter</span>
-              <svg className="h-2 w-2" stroke="currentColor" fill="none" viewBox="0 0 8 8"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M1 1l6 6m0-6L1 7" /></svg>
-            </button>
-          </span>
-        ))}
-      </div>
-      <div className="relative rounded-md shadow-sm">
-        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <svg className="h-5 w-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" /></svg>
+    <div className="relative w-full" ref={searchRef}> 
+        <div className="flex flex-wrap gap-2 mb-2">
+            {activeFilters.map((filter, index) => (
+                <span key={index} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+                    {filter.label}
+                    <button type="button" className="shrink-0 ml-1.5 h-4 w-4 rounded-full inline-flex items-center justify-center text-indigo-400 hover:bg-indigo-200 hover:text-indigo-500 focus:outline-none focus:bg-indigo-500 focus:text-white" onClick={() => onFilterRemove(filter)}>
+                        <span className="sr-only">Remove filter</span>
+                        <svg className="h-2 w-2" stroke="currentColor" fill="none" viewBox="0 0 8 8"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M1 1l6 6m0-6L1 7" /></svg>
+                    </button>
+                </span>
+            ))}
         </div>
-        <input 
-            type="text" 
-            ref={inputRef} 
-            value={searchText} 
-            onChange={(e) => setSearchText(e.target.value)} 
-            onFocus={() => setIsMenuOpen(true)} // Open menu on focus
-            onKeyDown={handleKeyDown}
-            placeholder="Search SKU, Model..." 
-            className="input-base pl-10 pr-10" // Adjusted padding for icons
-        />
-        <div className="absolute inset-y-0 right-0 flex items-center">
-            <button 
-                type="button"
-                onClick={() => setIsMenuOpen(!isMenuOpen)} // Toggle menu with filter button
-                className="h-full px-3 text-gray-500 hover:text-gray-700 focus:outline-none"
-                aria-label="Toggle filters"
-            >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L16 11.414V17l-4 4v-9.586L4.293 6.707A1 1 0 014 6V4z" /></svg>
-            </button>
-        </div>
-      </div>
-      {isMenuOpen && (
-        <div className="absolute z-10 mt-1 w-full rounded-md bg-white shadow-lg overflow-hidden border border-gray-200">
-           <div className="flex justify-between items-center bg-gray-50 p-2 border-b">
-                <h3 className="text-sm font-semibold text-gray-700 px-2">Filters</h3>
-                <button 
-                    type="button" 
-                    onClick={() => setIsMenuOpen(false)} // Close menu with X button
-                    className="p-1 rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-600"
-                    aria-label="Close filters"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+        <div className="relative rounded-md shadow-sm">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <svg className="h-5 w-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" /></svg>
+            </div>
+            <input type="text" ref={inputRef} value={searchText} onChange={(e) => setSearchText(e.target.value)} onFocus={() => setIsMenuOpen(true)} onKeyDown={handleKeyDown} placeholder="Search SKU, Model..." className="input-base pl-10 pr-10" />
+            <div className="absolute inset-y-0 right-0 flex items-center">
+                <button type="button" onClick={() => setIsMenuOpen(!isMenuOpen)} className="h-full px-3 text-gray-500 hover:text-gray-700 focus:outline-none" aria-label="Toggle filters">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L16 11.414V17l-4 4v-9.586L4.293 6.707A1 1 0 014 6V4z" /></svg>
                 </button>
             </div>
-          <div className="max-h-60 overflow-y-auto">
-            {categorizedFilterOptions.filter(g => g.options.length > 0).length > 0 ? (
-              categorizedFilterOptions.map(group => (
-                group.options.length > 0 && (
-                  <div key={group.key} className="border-b border-gray-100 py-3 last:border-b-0">
-                    <h3 className="text-xs font-bold uppercase text-indigo-700 mb-2 px-4">{group.label}</h3>
-                    <div className="flex flex-wrap gap-2 px-4">
-                      {group.options.map((option, index) => (
-                        <button key={index} type="button" onClick={() => handleMenuClick(option)} className={`px-3 py-1 text-sm rounded-full ${activeFilters.some(f => f.key === option.key && f.value === option.value) ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-800 hover:bg-gray-200'}`}>
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )
-              ))
-            ) : <div className="py-2 px-4 text-sm text-gray-500">No filters available.</div>}
-          </div>
         </div>
-      )}
+        {isMenuOpen && (
+            <div className="absolute z-10 mt-1 w-full rounded-md bg-white shadow-lg overflow-hidden border border-gray-200">
+                <div className="flex justify-between items-center bg-gray-50 p-2 border-b"><h3 className="text-sm font-semibold text-gray-700 px-2">Filters</h3><button type="button" onClick={() => setIsMenuOpen(false)} className="p-1 rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-600" aria-label="Close filters"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg></button></div>
+                <div className="max-h-60 overflow-y-auto">
+                    {categorizedFilterOptions.filter(g => g.options.length > 0).length > 0 ? (
+                    categorizedFilterOptions.map(group => (
+                        group.options.length > 0 && (
+                        <div key={group.key} className="border-b border-gray-100 py-3 last:border-b-0">
+                            <h3 className="text-xs font-bold uppercase text-indigo-700 mb-2 px-4">{group.label}</h3>
+                            <div className="flex flex-wrap gap-2 px-4">
+                            {group.options.map((option, index) => (
+                                <button key={index} type="button" onClick={() => handleMenuClick(option)} className={`px-3 py-1 text-sm rounded-full ${activeFilters.some(f => f.key === option.key && f.value === option.value) ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-800 hover:bg-gray-200'}`}>
+                                {option.label}
+                                </button>
+                            ))}
+                            </div>
+                        </div>
+                        )
+                    ))
+                    ) : <div className="py-2 px-4 text-sm text-gray-500">No filters available.</div>}
+                </div>
+            </div>
+        )}
     </div>
   );
 };
@@ -170,32 +144,37 @@ const ProductsPage = () => {
 
   const handleDeleteProduct = useCallback(async (productId, sku) => {
     if (isMutationDisabled) return;
-    if (window.confirm(`Are you sure you want to delete SKU: ${sku}? This is permanent.`)) {
-      try { await deleteProduct(productId); } catch (error) { alert(`Failed to delete: ${error.message}`); }
+
+    const productToDelete = products.find(p => p.id === productId);
+
+    const hasInventoryHistory = productToDelete?.stockSummary?.byLocation && Object.keys(productToDelete.stockSummary.byLocation).length > 0;
+
+    if (hasInventoryHistory) {
+        alert(`Cannot delete product SKU: ${sku}. This product has an inventory history and cannot be deleted.`);
+        return;
     }
-  }, [isMutationDisabled, deleteProduct]);
+
+    if (window.confirm(`Are you sure you want to delete SKU: ${sku}? This is permanent.`)) {
+      try { 
+        await deleteProduct(productId); 
+      } catch (error) { 
+        alert(`Failed to delete: ${error.message}`); 
+      }
+    }
+  }, [isMutationDisabled, deleteProduct, products]);
 
   const productsWithStock = useMemo(() => {
-    // The 'products' from useProducts now includes a 'stockSummary' object.
-  // Use the canonical total stock field from stockSummary.
-    return products.map(p => ({
-        ...p,
-      totalStock: p.stockSummary?.totalInStock ?? p.stockSummary?.inStock ?? 0
-    }));
+    return products.map(p => ({ ...p, totalStock: p.stockSummary?.totalInStock ?? p.stockSummary?.inStock ?? 0 }));
   }, [products]);
 
   const filteredProducts = useMemo(() => {
     let currentProducts = productsWithStock;
     if (searchText) {
       const lowerSearch = searchText.toLowerCase();
-      currentProducts = currentProducts.filter(p => 
-        Object.values(p).some(val => String(val).toLowerCase().includes(lowerSearch))
-      );
+      currentProducts = currentProducts.filter(p => Object.values(p).some(val => String(val).toLowerCase().includes(lowerSearch)));
     }
     if (activeFilters.length > 0) {
-      currentProducts = currentProducts.filter(p => 
-        activeFilters.every(f => p[getProductKeyFromFilterKey(f.key)] === f.value)
-      );
+      currentProducts = currentProducts.filter(p => activeFilters.every(f => p[getProductKeyFromFilterKey(f.key)] === f.value));
     }
     return currentProducts;
   }, [productsWithStock, searchText, activeFilters]);
@@ -214,7 +193,7 @@ const ProductsPage = () => {
     return (
       <div className="flex justify-end space-x-2 h-full items-center">
         <button onClick={() => navigate(`/products/details/${product.id}`)} className="text-blue-600 hover:text-blue-900 p-1" title="View Details"><ViewIcon className="w-5 h-5" /></button>
-        <button onClick={() => navigate(`/products/history/${product.sku}`)} className="text-green-600 hover:text-green-900 p-1" title="View History"><HistoryIcon className="w-5 h-5" /></button>
+        <button onClick={() => navigate(`/history?search=${product.sku}`)} className="text-green-600 hover:text-green-900 p-1" title="View History"><HistoryIcon className="w-5 h-5" /></button>
         <button onClick={() => navigate(`/products/edit/${product.id}`)} className={`text-indigo-600 hover:text-indigo-900 p-1 ${isMutationDisabled ? disabledClass : ''}`} disabled={isMutationDisabled} title="Edit Product"><EditIcon className="w-5 h-5" /></button>
         <button onClick={() => handleDeleteProduct(product.id, product.sku)} className={`text-red-600 hover:text-red-900 p-1 ${isMutationDisabled ? disabledClass : ''}`} disabled={isMutationDisabled} title="Delete Product"><DeleteIcon className="w-5 h-5" /></button>
       </div>
@@ -222,30 +201,80 @@ const ProductsPage = () => {
   }, [isMutationDisabled, navigate, handleDeleteProduct]);
 
   const columnDefs = useMemo(() => ([
-    { field: 'sku', headerName: 'SKU', minWidth: 120, filter: true },
-    { field: 'model', headerName: 'Model', minWidth: 150, filter: true },
-    { field: 'brand', headerName: 'Brand', minWidth: 100, filter: true },
-    { field: 'category', headerName: 'Category', minWidth: 120, filter: true },
-    { field: 'description', headerName: 'Description', filter: true, flex: 3, minWidth: 200, valueFormatter: p => p.value && p.value.length > 50 ? p.value.substring(0, 50) + '...' : p.value },
-    { field: 'totalStock', headerName: 'Total Stock', filter: 'agNumberColumnFilter', width: 130, cellStyle: { textAlign: 'center' } },
-    { field: 'reorderPoint', headerName: 'Reorder At', filter: 'agNumberColumnFilter', width: 120, cellStyle: { textAlign: 'center' }, cellRenderer: p => p.value ? <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">{p.value}</span> : null },
+    { field: 'sku', headerName: 'SKU', flex: 1, minWidth: 120, filter: true },
+    { field: 'model', headerName: 'Model', flex: 2, minWidth: 150, filter: true, sort: 'asc', sortIndex: 2 },
+    { field: 'brand', headerName: 'Brand', flex: 1, minWidth: 120, filter: true, sort: 'asc', sortIndex: 0 },
+    { field: 'category', headerName: 'Category', flex: 1, minWidth: 120, filter: true, sort: 'asc', sortIndex: 1 },
+    { field: 'description', headerName: 'Description', filter: true, flex: 3, minWidth: 150, valueFormatter: p => p.value && p.value.length > 50 ? p.value.substring(0, 50) + '...' : p.value },
+    { field: 'totalStock', headerName: 'Total Stock', filter: 'agNumberColumnFilter', width: 130, suppressSizeToFit: true, cellStyle: { textAlign: 'center' } },
+    { field: 'reorderPoint', headerName: 'Reorder At', filter: 'agNumberColumnFilter', width: 120, suppressSizeToFit: true, cellStyle: { textAlign: 'center' }, cellRenderer: p => p.value ? <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">{p.value}</span> : null },
     { field: 'actions', headerName: 'Actions', cellRenderer: actionCellRenderer, sortable: false, filter: false, width: 150, minWidth: 150, pinned: 'right' }
   ]), [actionCellRenderer]);
 
   const defaultColDef = useMemo(() => ({ resizable: true, sortable: true, filter: true, suppressHeaderMenuButton: true, flex: 1, minWidth: 80 }), []);
 
   const exportTo = (format) => {
-    const data = filteredProducts.map(p => ({ SKU: p.sku, Model: p.model, Brand: p.brand, Category: p.category, Description: p.description, TotalStock: p.totalStock, ReorderPoint: p.reorderPoint }));
+    const dataToExport = filteredProducts.map(p => ({
+      SKU: p.sku,
+      Model: p.model,
+      Brand: p.brand,
+      Category: p.category,
+      Description: p.description,
+      TotalStock: p.totalStock,
+      ReorderPoint: p.reorderPoint
+    }));
+
+    if (dataToExport.length === 0) {
+      alert("No products to export.");
+      setIsExportMenuOpen(false);
+      return;
+    }
+
     if (format === 'excel') {
-      const ws = XLSX.utils.json_to_sheet(data);
+      const ws = XLSX.utils.json_to_sheet(dataToExport);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Products");
       XLSX.writeFile(wb, "products.xlsx");
-    } else {
-      const doc = new jsPDF();
-      doc.text("Product List", 14, 15);
-      doc.autoTable({ head: [Object.keys(data[0])], body: data.map(Object.values) });
-      doc.save("products.pdf");
+    } else if (format === 'pdf') {
+      const doc = new jsPDF({ orientation: 'landscape' });
+
+      doc.setFontSize(18);
+      doc.setTextColor(40);
+      doc.text("Product List Report", 14, 20);
+      doc.setFontSize(11);
+      doc.setTextColor(100);
+      doc.text(`Exported on: ${new Date().toLocaleString()}`, 14, 26);
+
+      const columns = [
+        { header: 'SKU', dataKey: 'SKU' },
+        { header: 'Model', dataKey: 'Model' },
+        { header: 'Brand', dataKey: 'Brand' },
+        { header: 'Category', dataKey: 'Category' },
+        { header: 'Description', dataKey: 'Description' },
+        { header: 'Stock', dataKey: 'TotalStock' },
+        { header: 'Reorder', dataKey: 'ReorderPoint' },
+      ];
+
+      const body = dataToExport.map(p => ({
+        ...p,
+        Description: (p.Description && p.Description.length > 40) ? p.Description.substring(0, 40) + '...' : p.Description,
+      }));
+
+      doc.autoTable({
+        columns,
+        body,
+        startY: 32,
+        theme: 'grid',
+        headStyles: { fillColor: [22, 160, 133], textColor: 255, fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [245, 245, 245] },
+        didDrawPage: (data) => {
+          const pageCount = doc.internal.getNumberOfPages();
+          doc.setFontSize(10);
+          doc.text(`Page ${data.pageNumber} of ${pageCount}`, data.settings.margin.left, doc.internal.pageSize.height - 10);
+        }
+      });
+
+      doc.save(`products-export-${new Date().toISOString().slice(0,10)}.pdf`);
     }
     setIsExportMenuOpen(false);
   };
@@ -257,10 +286,16 @@ const ProductsPage = () => {
       <header className="page-header">
         <h1 className="page-title">Product Management</h1>
         <div className="page-actions">
-            <button onClick={() => navigate('/products/add')} className="btn btn-primary" disabled={isMutationDisabled}>Add Product</button>
-            <button onClick={() => navigate('/products/bulk-import')} className="btn btn-secondary" disabled={isMutationDisabled}>Bulk Import</button>
+            <button onClick={() => navigate('/products/add')} className="btn btn-primary" title= 'Add New Product' disabled={isMutationDisabled}>
+              <PackagePlus size={18} className="mr-2" />Add
+            </button>
+            <button onClick={() => navigate('/products/bulk-import')} className="btn btn-secondary" title='Bulk Import Products' disabled={isMutationDisabled}>
+              <ListFilterPlus size={18} className="mr-2" />Import
+            </button>
             <div className="relative inline-block text-left">
-              <button type="button" className="btn btn-secondary" onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}>Export</button>
+              <button type="button" className="btn btn-secondary" title='Export Products' onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}>
+                <FileDown size={18} className="mr-2" /> Export <ChevronDown size={16} className='ml-1'/>
+              </button>
               {isExportMenuOpen && (
                 <div className="absolute right-0 mt-1 w-48 z-10 py-1 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5">
                   <button onClick={() => exportTo('pdf')} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">As PDF</button>
@@ -272,7 +307,7 @@ const ProductsPage = () => {
       </header>
       
       <div className="page-content">
-        <div className="mb-6 card p-4">
+        <div className="flex justify-between items-center mb-6">
             <OdooSearchBar 
                 lookups={lookups} 
                 searchText={searchText} 
@@ -312,7 +347,6 @@ const ProductsPage = () => {
                     paginationPageSize={100}
                     paginationPageSizeSelector={[25, 50, 100, 200]}
                     onCellClicked={(params) => {
-                        // Check if the click was not on an action button before navigating
                         if (params.event.target.closest('.flex.justify-end')) return;
                         navigate(`/products/details/${params.data.id}`);
                     }}

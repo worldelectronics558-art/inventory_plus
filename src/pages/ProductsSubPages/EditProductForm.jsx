@@ -1,11 +1,10 @@
 
-// src/pages/ProductsSubPages/EditProductForm.jsx
-
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useProducts } from '../../contexts/ProductContext';
 import { useLookups } from '../../contexts/LookupContext';
 import NewLookupModal from '../../components/NewLookupModal.jsx';
+import LoadingOverlay from '../../components/LoadingOverlay.jsx';
 
 const EditProductForm = () => {
     const navigate = useNavigate();
@@ -115,6 +114,7 @@ const EditProductForm = () => {
 
     return (
         <div className="min-h-screen bg-gray-100">
+            {status.loading && <LoadingOverlay />}
             <div className="max-w-4xl mx-auto bg-white rounded-lg shadow-md p-6">
                 <div className="flex justify-between items-center mb-6">
                     <h1 className="text-2xl font-bold text-gray-800">Edit Product: {formData.sku}</h1>

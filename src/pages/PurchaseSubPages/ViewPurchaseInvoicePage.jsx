@@ -175,7 +175,7 @@ const ViewPurchaseInvoicePage = () => {
                                             <tr key={index}>
                                                 <td>
                                                     <div className="font-bold">{item.productName}</div>
-                                                    <div className="text-sm opacity-70">SKU: {item.productId}</div>
+                                                    <div className="text-sm opacity-70">SKU: {item.sku}</div>
                                                 </td>
                                                 <td className="text-right">{quantity}</td>
                                                 <td className="text-right font-semibold">{item.receivedQty || 0}</td>

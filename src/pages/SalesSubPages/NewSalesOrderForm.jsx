@@ -57,8 +57,13 @@ const NewSalesOrderForm = () => {
     };
 
     const customerOptions = useMemo(() => customers.map(c => ({ value: c.id, label: c.name })), [customers]);
-    const productOptions = useMemo(() => products.map(p => ({ value: p.sku, label: getProductDisplayName(p), salePrice: p.salePrice ?? 0 })), [products]);
-    const productsMap = useMemo(() => new Map(products.map(p => [p.sku, p])), [products]);
+    const productOptions = useMemo(() => products.map(p => ({ 
+        value: p.id, 
+        label: getProductDisplayName(p),
+        sku: p.sku,
+        salePrice: p.salePrice ?? 0 
+    })), [products]);
+    const productsMap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
 
     const handleItemChange = (index, field, value) => {
         const newItems = [...items];
@@ -125,13 +130,15 @@ const NewSalesOrderForm = () => {
                 notes,
                 items: items.map(item => {
                     const product = productsMap.get(item.productId.value);
-                    if (!product) throw new Error(`Details for product with SKU ${item.productId.value} could not be found.`);
+                    if (!product) throw new Error(`Product details not found.`);
+                    
                     return {
-                        productId: item.productId.value,
+                        productId: item.productId.value, // Now the Document ID [cite: 631]
+                        sku: product.sku,                // Explicitly adding SKU
                         productName: getProductDisplayName(product),
                         quantity: Number(item.quantity),
-                        unitSalePrice: roundToTwo(Number(item.unitSalePrice)), 
-                        unitRetailPrice: roundToTwo(Number(item.unitRetailPrice)),       
+                        unitSalePrice: roundToTwo(Number(item.unitSalePrice)),
+                        unitRetailPrice: roundToTwo(Number(item.unitRetailPrice)),
                         unitSaleGST: roundToTwo(Number(item.unitSaleGST)),
                     };
                 }),

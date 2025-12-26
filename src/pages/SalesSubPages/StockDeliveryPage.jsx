@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Select from 'react-select';
 import { useNavigate, Link } from 'react-router-dom';
 import { useUser } from '../../contexts/UserContext';
@@ -11,6 +11,7 @@ import { Plus, ChevronLeft, Send, X, CheckCircle } from 'lucide-react';
 import { useLoading } from '../../contexts/LoadingContext';
 import LoadingSpinner from '../../components/LoadingOverlay';
 
+// Reusing consistent styles from StockReceivePage
 const customSelectStyles = {
     control: (p, s) => ({
         ...p,
@@ -45,6 +46,7 @@ const StockDeliveryPage = () => {
 
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    // Initialize state
     const [formState, setFormState] = useState(() => {
         const savedState = sessionStorage.getItem(SESSION_STORAGE_KEY);
         return savedState ? JSON.parse(savedState) : { locationId: '', batchItems: [] };
@@ -67,8 +69,10 @@ const StockDeliveryPage = () => {
         [products]
     );
 
+    // Add item to the UI list
     const addBatchItem = (item) => {
         if (!item.isSerialized) {
+            // Merge quantities for non-serialized
             const existingItem = batchItems.find(bi => bi.productId === item.productId);
             if (existingItem) {
                 const newQuantity = existingItem.quantity + item.quantity;
@@ -78,12 +82,12 @@ const StockDeliveryPage = () => {
                 updateForm('batchItems', updated);
                 return;
             }
+        } else {
+            // Prevent duplicate serialized items
+            if (batchItems.some(bi => bi.inventoryItemId === item.inventoryItemId)) {
+                return;
+            }
         }
-        
-        if (item.isSerialized && batchItems.some(bi => bi.inventoryItemId === item.inventoryItemId)) {
-            return;
-        }
-
         updateForm('batchItems', [...batchItems, item]);
     };
 
@@ -91,10 +95,12 @@ const StockDeliveryPage = () => {
         updateForm('batchItems', batchItems.filter(item => item.id !== id));
     };
     
+    // --- CORE LOGIC UPDATE HERE ---
     const handleSaveBatch = async () => {
         if (isSubmitting) return;
         setIsSubmitting(true);
         setFormError('');
+        
         if (!user) { setFormError("User profile is not loaded."); setIsSubmitting(false); return; }
         if (!locationId) { setFormError('Please select a delivery location.'); setIsSubmitting(false); return; }
         if (batchItems.length === 0) { setFormError('You must add at least one product.'); setIsSubmitting(false); return; }
@@ -104,67 +110,72 @@ const StockDeliveryPage = () => {
         try {
             const productGroups = {};
 
+            // Group items by product to handle quantities and serials
             for (const item of batchItems) {
                 if (!productGroups[item.productId]) {
                     productGroups[item.productId] = {
                         productName: item.productName,
                         sku: item.sku,
                         isSerialized: item.isSerialized,
-                        items: [],
-                        quantity: 0
+                        items: [], 
+                        totalQuantity: 0
                     };
                 }
                 productGroups[item.productId].items.push(item);
-                productGroups[item.productId].quantity += item.quantity;
+                productGroups[item.productId].totalQuantity += item.quantity;
             }
             
+            // Create the final payload to be saved
             const itemsToDeliver = Object.keys(productGroups).map(productId => {
                 const group = productGroups[productId];
-                const cleanItem = {
+                
+                const payloadItem = {
                     productId: productId,
                     productName: group.productName,
                     sku: group.sku,
                     isSerialized: group.isSerialized,
+                    // THE FIX: Use the 'locationId' directly from the component's state,
+                    // just like in the working StockReceivePage.jsx file.
                     locationId: locationId,
-                    price: 0,
-                    cost: 0,
                     status: "PENDING",
-                    quantity: group.quantity,
+                    quantity: group.totalQuantity,
+                    price: 0,
+                    cost: 0
                 };
 
                 if (group.isSerialized) {
-                    cleanItem.serials = group.items.map(i => i.serial);
-                    cleanItem.inventoryItemIds = group.items.map(i => i.inventoryItemId);
+                    payloadItem.serials = group.items.map(i => i.serial); 
+                    payloadItem.inventoryItemIds = group.items.map(i => i.inventoryItemId);
                 } else {
-                    cleanItem.inventoryItemId = group.items[0].inventoryItemId;
+                    payloadItem.inventoryItemIds = group.items.map(i => i.inventoryItemId);
+                    payloadItem.inventoryItemId = group.items[0].inventoryItemId;
+                    payloadItem.serials = [];
                 }
-                return cleanItem;
+
+                return payloadItem;
             });
 
             if (itemsToDeliver.length === 0) {
                 throw new Error("No valid items to deliver.");
             }
             
-            const dummyOrder = { 
-                id: 'direct-delivery', orderNumber: 'N/A', 
-                customerName: 'Direct Delivery', customerId: null
-            };
-
+            const dummyOrder = { id: 'direct-delivery', orderNumber: 'N/A', customerName: 'Direct Delivery', customerId: null };
             await createPendingDeliverable(dummyOrder, itemsToDeliver, user);
-
+            
             alert('Delivery batch has been created successfully!');
             sessionStorage.removeItem(SESSION_STORAGE_KEY);
             setAppProcessing(false);
             navigate('/sales/pending-deliverables');
-
         } catch (error) {
             console.error("Error saving batch:", error);
             setFormError(`Failed to save batch: ${error.message}`);
             setAppProcessing(false);
         } finally {
             setIsSubmitting(false);
-        } 
+        }
     };
+
+
     
     const isLoading = isUserLoading || productsLoading || locationsLoading;
     if (isLoading) return <LoadingSpinner>Loading delivery data...</LoadingSpinner>;
@@ -251,13 +262,16 @@ const StockDeliveryPage = () => {
     );
 };
 
+// Sub-components kept similar to ensure logic consistency but adapted for "Selection" rather than "Entry"
+
 const AvailableStockPanel = ({ product, locationId, onItemSelected, existingBatchItems }) => {
-    const { inventoryItems: liveStock, isLoading: isStockLoading } = useLiveInventory(locationId, product.sku);
+    const { inventoryItems: liveStock, isLoading: isStockLoading } = useLiveInventory(locationId, product.sku, product.isSerialized);
     const [quantity, setQuantity] = useState(1);
 
+    // FIX: Aggregate quantity from ALL documents in liveStock
     const nonSerializedStockOnHand = useMemo(() => {
         if (product.isSerialized || !liveStock.length) return 0;
-        return liveStock[0].quantity;
+        return liveStock.reduce((acc, item) => acc + (item.quantity || 0), 0);
     }, [liveStock, product.isSerialized]);
 
     const nonSerializedInBatch = useMemo(() => {
@@ -271,9 +285,12 @@ const AvailableStockPanel = ({ product, locationId, onItemSelected, existingBatc
     const handleAddNonSerialized = () => {
         if (quantity > availableToSelect || quantity <= 0) return;
         
+        // When adding non-serialized, we use the first matching document ID as a reference
+        // but because we now pass multiple inventoryItemIds in the payload (above),
+        // the backend can perform FIFO deduction across all documents.
         onItemSelected({
-            id: product.id, 
-            inventoryItemId: liveStock[0].id,
+            id: `ns_${product.id}`, 
+            inventoryItemId: liveStock[0].id, // Reference ID
             productId: product.id,
             sku: product.sku,
             productName: getProductDisplayName(product),
@@ -286,13 +303,13 @@ const AvailableStockPanel = ({ product, locationId, onItemSelected, existingBatc
 
     const handleAddSerialized = (stockItem) => {
         onItemSelected({
-            id: stockItem.id, 
+            id: stockItem.id, // Using the inventory item ID as unique key for batch item
             inventoryItemId: stockItem.id,
             productId: product.id,
             sku: product.sku,
             productName: getProductDisplayName(product),
             isSerialized: true,
-            serial: stockItem.serial, // Use singular 'serial' for an individual unit
+            serial: stockItem.serial, // Capture singular serial here for display
             quantity: 1,
             locationId: locationId,
         });
@@ -322,7 +339,8 @@ const AvailableStockPanel = ({ product, locationId, onItemSelected, existingBatc
                 </div>
             ) : ( 
                 <div className="mt-2">
-                     <p className='text-sm mb-2'>Available to add: <span className='font-bold'>{availableToSelect}</span> / {nonSerializedStockOnHand}</p>
+                    {/* UI now reflects the SUM of all matching documents */}
+                    <p className='text-sm mb-2'>Available to add: <span className='font-bold'>{availableToSelect}</span> / {nonSerializedStockOnHand}</p>
                     {availableToSelect > 0 ? (
                         <div className="flex items-center gap-2">
                             <input 
@@ -358,8 +376,10 @@ const DeliveryItemCard = ({ item, onRemove }) => {
                     <h3 className="font-bold text-lg">{item.productName}</h3>
                     <p className="text-sm text-gray-600 font-mono">SKU: {item.sku}</p>
                     <p className="text-sm text-gray-700 mt-1">
-                        {/* Correctly display the serial for an individual serialized item */}
-                        {item.isSerialized ? `Serial: ${item.serial}` : `Quantity: ${item.quantity}`}
+                        {item.isSerialized 
+                            ? <span className="badge badge-outline">Serial: {item.serial}</span> 
+                            : `Quantity: ${item.quantity}`
+                        }
                     </p>
                 </div>
                 <button

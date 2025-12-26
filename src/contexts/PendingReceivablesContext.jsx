@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from './AuthContext';
@@ -9,7 +8,6 @@ const PendingReceivablesContext = createContext();
 export const usePendingReceivables = () => useContext(PendingReceivablesContext);
 
 export const PendingReceivablesProvider = ({ children }) => {
-    // FIX: Destructure `userId` directly from the `useAuth` hook.
     const { user, db, appId, userId } = useAuth();
     const [pendingReceivables, setPendingReceivables] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -55,9 +53,7 @@ export const PendingReceivablesProvider = ({ children }) => {
                 batchId: batchId,
                 createdAt: serverTimestamp(),
                 createdBy: {
-                    // FIX: Use the reliable `userId` from the auth context for the UID.
                     uid: userId,
-                    // FIX: Use the passed-in user object for display name, with a fallback.
                     name: receivingUser.displayName || 'N/A',
                 },
                 status: 'PENDING',

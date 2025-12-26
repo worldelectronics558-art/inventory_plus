@@ -1,11 +1,10 @@
 
-// src/pages/AddProductForm.jsx
-
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProducts } from '../../contexts/ProductContext';
 import { useLookups } from '../../contexts/LookupContext';
 import NewLookupModal from '../../components/NewLookupModal.jsx';
+import LoadingOverlay from '../../components/LoadingOverlay.jsx';
 
 const AddProductForm = () => {
     const navigate = useNavigate();
@@ -102,6 +101,7 @@ const AddProductForm = () => {
 
     return (
         <div className="min-h-screen bg-gray-100">
+            {status.loading && <LoadingOverlay />}
             <div className="max-w-4xl mx-auto bg-white rounded-lg shadow-md p-6">
                 <div className="flex justify-between items-center mb-6">
                     <h1 className="text-2xl font-bold text-gray-800">Add New Product</h1>

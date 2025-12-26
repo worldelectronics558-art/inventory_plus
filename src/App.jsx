@@ -23,13 +23,14 @@ import CustomersPage from './pages/CustomersPage.jsx';
 import HistoryPage from './pages/HistoryPage.jsx';
 import SettingsPage from './pages/SettingsPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
+import LogDetailsPage from './pages/HistorySubPages/LogDetailsPage.jsx'; // <-- IMPORT NEW PAGE
 
 // Purchase Pages
 import PurchasePage from './pages/PurchasePage.jsx'; 
 import SuppliersPage from './pages/SuppliersPage.jsx';
-import NewSupplierForm from './pages/suppliersSubPages/NewSupplierForm.jsx';
-import SupplierDetailsPage from './pages/suppliersSubPages/SupplierDetailsPage.jsx';
-import EditSupplierForm from './pages/suppliersSubPages/EditSupplierForm.jsx';
+import NewSupplierForm from './pages/SuppliersSubPages/NewSupplierForm.jsx';
+import SupplierDetailsPage from './pages/SuppliersSubPages/SupplierDetailsPage.jsx';
+import EditSupplierForm from './pages/SuppliersSubPages/EditSupplierForm.jsx';
 import NewPurchaseInvoiceForm from './pages/PurchaseSubPages/NewPurchaseInvoiceForm.jsx';
 import EditPurchaseInvoiceForm from './pages/PurchaseSubPages/EditPurchaseInvoiceForm.jsx';
 import ViewPurchaseInvoicePage from './pages/PurchaseSubPages/ViewPurchaseInvoicePage.jsx';
@@ -55,7 +56,6 @@ import AddProductForm from './pages/ProductsSubPages/AddProductForm.jsx';
 import EditProductForm from './pages/ProductsSubPages/EditProductForm.jsx';
 import ProductsImportForm from './pages/ProductsSubPages/ProductsImportForm.jsx';
 import ProductDetailsPage from './pages/ProductsSubPages/ProductDetailsPage.jsx';
-import ProductHistoryPage from './pages/ProductsSubPages/ProductHistoryPage.jsx';
 
 const useMediaQuery = (query) => {
     const [matches, setMatches] = useState(window.matchMedia(query).matches);
@@ -116,7 +116,6 @@ const AppContent = () => {
                     <Route path="/products/bulk-import" element={<ProductsImportForm />} />
                     <Route path="/products/edit/:id" element={<EditProductForm />} />
                     <Route path="/products/details/:id" element={<ProductDetailsPage />} />
-                    <Route path="/products/history/:sku" element={<ProductHistoryPage />} />
                     <Route path="/inventory" element={<InventoryPage />} />
                     
                     <Route path="/purchase" element={<PurchasePage />} />
@@ -145,6 +144,7 @@ const AppContent = () => {
                     <Route path="/customers/:id" element={<CustomerDetailsPage />} />
                     
                     <Route path="/history" element={<HistoryPage />} />
+                    <Route path="/history/:logId" element={<LogDetailsPage />} /> {/* <-- ADD NEW ROUTE */}
                     <Route path="/settings" element={<SettingsPage />} />
                     <Route path="*" element={<div className="p-8 text-2xl text-red-500">404 Page Not Found</div>} />
                 </Routes>

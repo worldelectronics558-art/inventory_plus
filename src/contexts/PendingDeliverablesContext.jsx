@@ -1,9 +1,6 @@
-
-// src/contexts/PendingDeliverablesContext.jsx
-
-import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { collection, query, where, onSnapshot, doc, setDoc, getDocs, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from './AuthContext';
-import { collection, onSnapshot, setDoc, doc, deleteDoc, writeBatch, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
 import { generateDeliveryBatchId } from '../firebase/system_services';
 
 const PendingDeliverablesContext = createContext();
@@ -14,9 +11,9 @@ export const PendingDeliverablesProvider = ({ children }) => {
     const { db, appId, userId } = useAuth();
     const [pendingDeliverables, setPendingDeliverables] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState(null);
     const [isMutationDisabled, setIsMutationDisabled] = useState(false);
 
+    // 1. Unified Listener logic (Matches Receivables pattern)
     useEffect(() => {
         if (!userId || !db || !appId) {
             setPendingDeliverables([]);
@@ -25,94 +22,101 @@ export const PendingDeliverablesProvider = ({ children }) => {
         }
 
         setIsLoading(true);
-        const deliverablesCollectionRef = collection(db, `/artifacts/${appId}/pending_deliverables`);
-        // Mirror PendingReceivables behaviour: only listen to PENDING docs
-        const q = query(deliverablesCollectionRef, where('status', '==', 'PENDING_DELIVERY'));
+        const deliverablesCollectionRef = collection(db, `artifacts/${appId}/pending_deliverables`);
+        const q = query(deliverablesCollectionRef, where('status', '==', 'PENDING'));
 
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const deliverableBatches = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const unsubscribe = onSnapshot(q, (querySnapshot) => {
+            const deliverableBatches = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             setPendingDeliverables(deliverableBatches);
             setIsLoading(false);
         }, (err) => {
-            console.error("Failed to listen to pending deliverables collection:", err);
-            setError(err);
+            console.error("Error fetching pending deliverables: ", err);
             setIsLoading(false);
         });
 
         return () => unsubscribe();
+    }, [db, appId, userId]);
 
-    }, [userId, db, appId]);
+    // 2. Creation logic (Aligned with Receivables, but specific to Sales Orders)
+    const createPendingDeliverable = async (order, items, deliveringUser) => {
+        if (!items || items.length === 0) {
+            throw new Error("No items to add to the delivery batch.");
+        }
 
-    const createPendingDeliverable = useCallback(async (order, items, user) => {
+        if (!db || !appId || !userId || !order || !deliveringUser) {
+            throw new Error("Missing required data to create a pending deliverable.");
+        }
+
         setIsMutationDisabled(true);
         try {
-            if (!db || !appId || !userId || !order || !items?.length || !user) {
-                throw new Error("Missing required data to create a pending deliverable.");
-            }
-
             const batchId = await generateDeliveryBatchId(db, appId);
-            const deliverablesCollectionRef = collection(db, `artifacts/${appId}/pending_deliverables`);
 
-            const allItems = items.map(item => ({
-                productId: item.productId,
-                productName: item.productName,
-                isSerialized: item.isSerialized,
-                sku: item.sku, // Pass SKU for easier lookup
-                serial: item.serial || null,
-                quantity: item.quantity,
-                inventoryItemId: item.inventoryItemId || null,
-                locationId: item.locationId,
-                status: 'PENDING', // Match per-item status pattern from pending_receivables
-            }));
-            
-            // Align shape with pending_receivables: one document per batch, keyed by batchId.
-            await setDoc(doc(deliverablesCollectionRef, batchId), {
+            const newBatch = {
+                batchId: batchId,
+                salesOrderNumber: order.documentNumber || order.orderNumber || 'NA',
+                customerName: order.customerName || 'NA',
                 salesOrderId: order.id,
-                salesOrderNumber: order.orderNumber,
-                customerName: order.customerName,
-                customerId: order.customerId,
-                batchId,
-                items: allItems,
-                status: 'PENDING_DELIVERY',
+                status: 'PENDING',
                 createdAt: serverTimestamp(),
-                createdBy: { uid: userId, name: user.displayName || 'N/A' },
-            });
+                createdBy: { 
+                    uid: userId, 
+                    name: deliveringUser.displayName || 'N/A' 
+                },
+                // Clean mapping to ensure SKU and ID are explicitly saved
+                items: items.map(item => ({
+                    productId: item.productId, 
+                    sku: item.sku || '',
+                    productName: item.productName || 'Unknown Product',
+                    quantity: Number(item.quantity),
+                    isSerialized: !!item.isSerialized,
+                    status: 'PENDING',
+                    ...(item.isSerialized ? {
+                        serials: item.serials || [],
+                        inventoryItemIds: item.inventoryItemIds || []
+                    } : {
+                        inventoryItemId: item.inventoryItemId || null
+                    })
+                }))
+            };
 
-        } catch (error) {
-            console.error("Failed to create pending deliverable:", error);
-            throw error;
+            const batchDocRef = doc(db, `artifacts/${appId}/pending_deliverables`, batchId);
+            await setDoc(batchDocRef, newBatch);
+
+        } catch (err) {
+            console.error("Failed to create pending deliverable:", err);
+            throw err;
         } finally {
             setIsMutationDisabled(false);
         }
-    }, [db, appId, userId]);
+    };
 
-    const deleteDeliverableBatch = useCallback(async (batchId) => {
-        if (!batchId || !db || !appId) throw new Error("Missing required data.");
+    // 3. Deletion logic
+    const deleteDeliverableBatch = async (batchId) => {
+        if (!batchId || !db || !appId) return;
 
-        const deliverablesCollectionRef = collection(db, `/artifacts/${appId}/pending_deliverables`);
-        const q = query(deliverablesCollectionRef, where("batchId", "==", batchId));
-
+        setIsMutationDisabled(true);
         try {
+            const deliverablesCollectionRef = collection(db, `artifacts/${appId}/pending_deliverables`);
+            const q = query(deliverablesCollectionRef, where("batchId", "==", batchId));
             const querySnapshot = await getDocs(q);
-            if (querySnapshot.empty) return;
             
             const batch = writeBatch(db);
             querySnapshot.forEach(doc => batch.delete(doc.ref));
-            
             await batch.commit();
         } catch (err) {
             console.error(`Error deleting batch ${batchId}:`, err);
             throw err;
+        } finally {
+            setIsMutationDisabled(false);
         }
-    }, [db, appId]);
+    };
 
     const value = {
         pendingDeliverables,
         isLoading,
-        error,
+        isMutationDisabled,
         createPendingDeliverable,
         deleteDeliverableBatch,
-        isMutationDisabled,
     };
 
     return (

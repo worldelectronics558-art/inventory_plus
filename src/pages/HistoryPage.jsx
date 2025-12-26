@@ -1,242 +1,238 @@
 
-// src/pages/HistoryPage.jsx
-
 import React, { useState, useMemo, useEffect } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
-import Select from 'react-select';
-import { subDays, startOfDay, endOfDay } from 'date-fns';
+import { Link, useLocation } from 'react-router-dom';
+import { Search, Sliders, ChevronDown, ChevronRight, FileText, AlertTriangle } from 'lucide-react';
 
-// Contexts & Utils
+// --- Hooks & Contexts ---
+import useHistoryLogs from '../hooks/useHistoryLogs';
 import { useProducts } from '../contexts/ProductContext';
-import { formatDate } from '../utils/formatDate';
-import { getProductDisplayName } from '../utils/productUtils';
-import { processTransactions } from '../utils/transactionUtils';
-
-// Components
-import useMediaQuery from '../hooks/useMediaQuery';
+import { useLocations } from '../contexts/LocationContext'; // Import useLocations
+import LoadingSpinner from '../components/LoadingOverlay';
 import ReusableDatePicker from '../components/ReusableDatePicker';
-import { ChevronDown, ChevronRight, Filter, Package, ArrowUp, ArrowDown, ArrowRightLeft, Search } from 'lucide-react';
 
-const ITEMS_PER_PAGE = 20;
+// --- Constants & Utils ---
+import { EVENT_TYPES } from '../constants/eventTypes';
+import { getProductDisplayName } from '../utils/productUtils';
+import { endOfDay } from 'date-fns';
 
-// --- Reusable Components ---
-
-const selectStyles = {
-    control: (p) => ({ ...p, backgroundColor: '#F9FAFB', borderColor: '#D1D5DB', minHeight: '42px' }),
-    menuPortal: (b) => ({ ...b, zIndex: 9999 })
+const formatTimestamp = (timestamp) => {
+    if (!timestamp || !timestamp.toDate) return 'N/A';
+    return timestamp.toDate().toLocaleString();
 };
 
-const getTxIcon = (type, size = 18) => {
-    const icons = {
-        IN: <ArrowDown className="text-green-500" size={size} />,
-        OUT: <ArrowUp className="text-red-500" size={size} />,
-        TRANSFER: <ArrowRightLeft className="text-blue-500" size={size} />,
+const EventTypeBadge = ({ type }) => {
+    const typeDetails = Object.values(EVENT_TYPES).find(t => t.key === type);
+    const label = typeDetails ? typeDetails.label : type.replace('_', ' ');
+    const typeStyles = {
+        PURCHASE_RECEIVED: 'bg-green-100 text-green-700',
+        SALE_DISPATCHED: 'bg-blue-100 text-blue-700',
+        STOCK_ADJUSTED: 'bg-yellow-100 text-yellow-700',
+        DEFAULT: 'bg-gray-100 text-gray-700'
     };
-    return icons[type] || <Package size={size} />;
-};
-
-// --- Main Components ---
-
-const TransactionRow = ({ txGroup, products }) => {
-    const [isExpanded, setIsExpanded] = useState(false);
-    const { type, referenceNumber, timestamp, userName, items, notes, documentNumber } = txGroup;
-
-    const getProductInfo = (sku) => {
-        const product = products.find(p => p.sku === sku);
-        return product ? getProductDisplayName(product) : 'Unknown SKU';
-    };
-
-    return (
-        <>
-            <tr className={`hover:bg-gray-50 ${isExpanded ? 'bg-gray-100' : ''}`}>
-                <td className="p-3"><button onClick={() => setIsExpanded(!isExpanded)} className="flex items-center">{isExpanded ? <ChevronDown size={20}/> : <ChevronRight size={20}/>}<span className="ml-2">{getTxIcon(type)}</span></button></td>
-                <td className="p-3 font-mono text-cyan-600">{referenceNumber}</td>
-                <td className="p-3">{formatDate(timestamp)}</td>
-                <td className="p-3">{userName}</td>
-                <td className="p-3 text-center">{items.length}</td>
-            </tr>
-            {isExpanded && (
-                <tr className="bg-gray-50/50">
-                    <td colSpan="5" className="p-4">
-                        <div className="bg-white p-3 rounded-lg shadow-inner">
-                            <h4 className="font-bold mb-2">Transaction Breakdown</h4>
-                            <div className="space-y-2">
-                                {items.map((item, index) => {
-                                    const isTransfer = item.type === 'TRANSFER' || item.isGrouped;
-                                    const changeColor = isTransfer ? 'text-blue-600' : (item.quantityChange > 0 ? 'text-green-600' : 'text-red-600');
-                                    const changePrefix = isTransfer ? '' : (item.quantityChange > 0 ? '+' : '-');
-                                    const quantity = isTransfer ? item.quantityChange : Math.abs(item.quantityChange);
-
-                                    return (
-                                        <div key={index} className="grid grid-cols-1 md:grid-cols-4 gap-x-4 p-2 bg-gray-50 rounded text-sm items-center">
-                                            <div><span className="font-semibold">Product:</span> {getProductInfo(item.sku)}</div>
-                                            <div><span className="font-semibold">Change:</span> <span className={`${changeColor} font-bold`}>{changePrefix}{quantity}</span></div>
-                                            <div className="font-bold">Qty After: {item.quantityAfter}</div>
-                                            <div><span className="font-semibold">Location:</span> {isTransfer ? `${item.fromLocation} → ${item.toLocation}` : item.location}</div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                             {(notes || documentNumber) && <div className="mt-3 pt-2 border-t text-xs">
-                                {notes && <p><span className="font-semibold">Notes:</span> {notes}</p>}
-                                {documentNumber && <p><span className="font-semibold">Doc #:</span> {documentNumber}</p>}
-                            </div>}
-                        </div>
-                    </td>
-                </tr>
-            )}
-        </>
-    );
-};
-
-const TransactionCard = ({ txGroup, products }) => {
-    const { type, referenceNumber, timestamp, userName, items, notes, documentNumber } = txGroup;
-
-    const getProductInfo = (sku) => {
-        const product = products.find(p => p.sku === sku);
-        return product ? getProductDisplayName(product) : 'Unknown SKU';
-    };
-
-    return (
-        <div className="card mb-4">
-            <div className="p-4 border-b flex justify-between items-start">
-                <div>
-                    <p className="font-bold flex items-center">{getTxIcon(type, 20)}<span className="ml-2">{type}</span></p>
-                    <p className="font-mono text-cyan-600 text-sm mt-1">{referenceNumber}</p>
-                </div>
-                <div className="text-right text-xs">
-                    <p>{formatDate(timestamp)}</p>
-                    <p className="text-gray-600">by {userName}</p>
-                </div>
-            </div>
-            <div className="p-4 bg-gray-50">
-                <h5 className="font-semibold text-sm mb-2">Items ({items.length})</h5>
-                <div className="space-y-3">
-                    {items.map((item, index) => {
-                        const isTransfer = item.type === 'TRANSFER' || item.isGrouped;
-                        const changeColor = isTransfer ? 'text-blue-600' : (item.quantityChange > 0 ? 'text-green-600' : 'text-red-600');
-                        const changePrefix = isTransfer ? '' : (item.quantityChange > 0 ? '+' : '-');
-                        const quantity = isTransfer ? item.quantityChange : Math.abs(item.quantityChange);
-
-                        return (
-                            <div key={index} className="p-2 bg-white rounded-md shadow-sm text-sm">
-                                <p className="font-bold">{getProductInfo(item.sku)}</p>
-                                <p><span className="font-semibold">Change:</span> <span className={`${changeColor} font-bold`}>{changePrefix}{quantity}</span></p>
-                                <p className="font-bold">Qty After: {item.quantityAfter}</p>
-                                <p><span className="font-semibold">Location:</span> {isTransfer ? `${item.fromLocation} → ${item.toLocation}` : item.location}</p>
-                            </div>
-                        );
-                    })}
-                </div>
-            </div>
-            {(notes || documentNumber) && <div className="p-4 border-t text-xs">
-                {notes && <p><span className="font-semibold">Notes:</span> {notes}</p>}
-                {documentNumber && <p><span className="font-semibold">Doc #:</span> {documentNumber}</p>}
-            </div>}
-        </div>
-    );
+    const style = typeStyles[type] || typeStyles.DEFAULT;
+    return <span className={`badge ${style}`}>{label}</span>;
 };
 
 const HistoryPage = () => {
-    const { transactions, isLoading } = useInventory();
-    const { products } = useProducts();
-    const isMobile = useMediaQuery('(max-width: 767px)');
-    const navigate = useNavigate();
     const location = useLocation();
+    const { logs, isLoading: logsLoading, error } = useHistoryLogs();
+    const { products, isLoading: productsLoading } = useProducts();
+    const { locations, isLoading: locationsLoading } = useLocations(); // Use locations hook
 
-    // State for filters and pagination
-    const [currentPage, setCurrentPage] = useState(1);
-    const [filterType, setFilterType] = useState('');
-    const [selectedProduct, setSelectedProduct] = useState(null);
-    const [dateRange, setDateRange] = useState([startOfDay(subDays(new Date(), 30)), endOfDay(new Date())]);
-    const [startDate, endDate] = dateRange || [null, null];
+    // --- STATE MANAGEMENT ---
+    const [searchTerm, setSearchTerm] = useState('');
+    const [eventTypeFilter, setEventTypeFilter] = useState('');
+    const [dateRange, setDateRange] = useState([null, null]);
+    const [expandedOperations, setExpandedOperations] = useState(new Set());
 
-    // Handle URL param for SKU pre-selection
+    // --- DATA TRANSFORMATION & FILTERING ---
+    const productMap = useMemo(() => products.reduce((acc, p) => ({ ...acc, [p.id]: p }), {}), [products]);
+    const locationMap = useMemo(() => locations.reduce((acc, loc) => ({ ...acc, [loc.id]: loc.name }), {}), [locations]); // Create location map
+
     useEffect(() => {
         const params = new URLSearchParams(location.search);
-        const skuFromUrl = params.get('sku');
-        if (skuFromUrl && products.length > 0) {
-            const product = products.find(p => p.sku === skuFromUrl);
-            if (product) setSelectedProduct({ value: product.sku, label: getProductDisplayName(product) });
+        const searchQuery = params.get('search');
+        if (searchQuery) {
+            setSearchTerm(searchQuery);
         }
-    }, [location.search, products]);
+    }, [location.search]);
 
-    const productOptions = useMemo(() =>
-        products.map(p => ({ value: p.sku, label: getProductDisplayName(p) }))
-    , [products]);
+    const groupedAndFilteredOperations = useMemo(() => {
+        const groupedByOp = logs.reduce((acc, log) => {
+            const opId = log.operationId || log.id;
+            if (!acc[opId]) {
+                acc[opId] = {
+                    operationId: opId,
+                    timestamp: log.timestamp,
+                    user: log.user,
+                    type: log.type,
+                    context: log.context,
+                    items: [],
+                    totalQuantity: 0,
+                    involvedSkus: new Set(),
+                };
+            }
+            acc[opId].items.push({
+                ...log,
+                productName: log.productId ? getProductDisplayName(productMap[log.productId] || { name: 'Unknown' }) : 'N/A',
+                locationName: locationMap[log.locationId] || log.locationId || 'N/A',
+            });
+            acc[opId].totalQuantity += log.quantity;
+            if (log.sku) acc[opId].involvedSkus.add(log.sku);
+            return acc;
+        }, {});
 
-    // Centralized processing and filtering logic
-    const filteredTransactions = useMemo(() => {
-        const processed = processTransactions({ transactions, groupBy: 'transactionId' });
-        
-        return processed.filter(group => {
-            if (filterType && group.type !== filterType) return false;
-            // Correctly convert Firestore timestamp to a JS Date object for comparison
-            const groupDate = group.timestamp.toDate();
-            if (startDate && groupDate < startDate) return false;
-            if (endDate && groupDate > endDate) return false;
-            if (selectedProduct && !group.items.some(item => item.sku === selectedProduct.value)) return false;
+        const [startDate, endDate] = dateRange;
+        return Object.values(groupedByOp).filter(op => {
+            if (startDate && op.timestamp?.toDate() < startDate) return false;
+            if (endDate && op.timestamp?.toDate() > endOfDay(endDate)) return false;
+            if (eventTypeFilter && op.type !== eventTypeFilter) return false;
+
+            const term = searchTerm.toLowerCase();
+            if (term) {
+                const opMatch = 
+                    (op.user?.name?.toLowerCase().includes(term)) ||
+                    (op.context?.documentNumber?.toLowerCase().includes(term)) ||
+                    (op.operationId?.toLowerCase().includes(term));
+
+                const itemMatch = op.items.some(item => 
+                    item.productName.toLowerCase().includes(term) ||
+                    item.sku?.toLowerCase().includes(term)
+                );
+
+                if (!opMatch && !itemMatch) return false;
+            }
             return true;
         });
-    }, [transactions, filterType, startDate, endDate, selectedProduct]);
+    }, [logs, searchTerm, eventTypeFilter, dateRange, productMap, locationMap]);
 
-    // Pagination logic
-    const paginatedTransactions = useMemo(() => {
-        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-        return filteredTransactions.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-    }, [filteredTransactions, currentPage]);
-    const totalPages = Math.ceil(filteredTransactions.length / ITEMS_PER_PAGE);
-
-    const handleProductChange = (option) => {
-        setSelectedProduct(option);
-        navigate(option ? `${location.pathname}?sku=${option.value}` : location.pathname, { replace: true });
-        setCurrentPage(1);
+    const toggleOperation = (opId) => {
+        setExpandedOperations(prev => {
+            const next = new Set(prev);
+            if (next.has(opId)) next.delete(opId); else next.add(opId);
+            return next;
+        });
     };
-    
-    if (isLoading) return <div className="p-8 text-center text-xl">Loading history...</div>;
+
+    const isLoading = logsLoading || productsLoading || locationsLoading; // Add locations loading
+
+    if (isLoading) return <LoadingSpinner>Loading History...</LoadingSpinner>;
+    if (error) return <div className="page-container"><p className="text-red-500">Error: {error.message}</p></div>;
 
     return (
-        <div>
-            <h1 className="page-title">Transaction History</h1>
-            {/* --- Filter Controls --- */}
-            <div className="card mb-6">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
-                    <div className="flex items-center gap-2"><Search size={20} className="text-gray-400" /><Select options={productOptions} value={selectedProduct} onChange={handleProductChange} isClearable placeholder="Filter by Product..." styles={selectStyles} menuPortalTarget={document.body} className="w-full"/></div>
-                    <div className="flex items-center gap-2"><Filter size={20} className="text-gray-400" /><select value={filterType} onChange={e => { setFilterType(e.target.value); setCurrentPage(1); }} className="input-base w-full"><option value="">All Types</option><option value="IN">Stock In</option><option value="OUT">Stock Out</option><option value="TRANSFER">Transfer</option></select></div>
-                    <div><ReusableDatePicker dateRange={dateRange} setDateRange={setDateRange} /></div>
+        <div className="page-container">
+            <header className="page-header">
+                <h1 className="page-title">Inventory History</h1>
+            </header>
+
+            <div className="card">
+                <div className="p-4 bg-gray-50/80 border-b grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+                    <div className="md:col-span-1">
+                        <div className="search-input-container">
+                            <Search size={18} className="search-input-icon" />
+                            <input type="text" placeholder="Search Product, SKU, User, Document..." className="search-input" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:col-span-2">
+                        <ReusableDatePicker dateRange={dateRange} setDateRange={setDateRange} />
+                        <div className="flex items-center gap-2">
+                            <Sliders size={18} className="text-gray-400"/>
+                            <select className="input-base w-full" value={eventTypeFilter} onChange={e => setEventTypeFilter(e.target.value)}>
+                                <option value="">All Event Types</option>
+                                {Object.values(EVENT_TYPES).map(type => (
+                                    <option key={type.key} value={type.key}>{type.label}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                    <table className="table">
+                        <thead>
+                            <tr>
+                                <th className="w-12"></th>
+                                <th>Operation</th>
+                                <th>SKUs</th>
+                                <th>Total Qty</th>
+                                <th>User</th>
+                                <th>Timestamp</th>
+                                <th>Document</th>
+                                <th className="w-24"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {groupedAndFilteredOperations.length === 0 ? (
+                                <tr><td colSpan="8" className="text-center py-12 text-gray-500">
+                                    <div className="flex flex-col items-center">
+                                        <AlertTriangle className="mb-2" />
+                                        <p className="font-semibold">No History Found</p>
+                                        <p className="text-sm">No records match your current filters.</p>
+                                    </div>
+                                </td></tr>
+                            ) : (
+                                groupedAndFilteredOperations.map(op => {
+                                    const isExpanded = expandedOperations.has(op.operationId);
+                                    return (
+                                        <React.Fragment key={op.operationId}>
+                                            <tr className="hover:bg-gray-50 cursor-pointer" onClick={() => toggleOperation(op.operationId)}>
+                                                <td className="text-center"><div className="p-1 rounded-full hover:bg-gray-200">{isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</div></td>
+                                                <td><EventTypeBadge type={op.type} /></td>
+                                                <td className="font-mono text-xs max-w-xs truncate" title={[...op.involvedSkus].join(', ')}>{ [...op.involvedSkus].join(', ') }</td>
+                                                <td className={`font-bold text-center text-lg ${op.type === 'SALE_DISPATCHED' ? 'text-red-500' : 'text-green-600'}`}>
+                                                    {op.type === 'SALE_DISPATCHED' ? '-' : '+'}{op.totalQuantity}
+                                                </td>
+                                                <td>{op.user?.name || 'System'}</td>
+                                                <td>{formatTimestamp(op.timestamp)}</td>
+                                                <td>
+                                                    {op.context?.documentId ? (
+                                                        <Link to={`/${op.context.type === 'SALES_ORDER' ? 'sales/view' : 'purchase/view'}/${op.context.documentId}`} className="text-blue-600 hover:underline">{op.context.documentNumber}</Link>
+                                                    ) : 'N/A'}
+                                                </td>
+                                                <td className="text-right">
+                                                    <button onClick={(e) => { e.stopPropagation(); toggleOperation(op.operationId); }} className="btn btn-sm btn-outline-primary">{isExpanded ? 'Hide' : 'Show'}</button>
+                                                </td>
+                                            </tr>
+                                            {isExpanded && (
+                                                <tr className="bg-gray-50/50">
+                                                    <td colSpan="8" className="p-0">
+                                                        <div className="p-3">
+                                                            <table className="w-full text-sm">
+                                                                <thead><tr className="bg-gray-100">
+                                                                    <th className="p-2 text-left font-semibold">Product</th>
+                                                                    <th className="p-2 text-left font-semibold">SKU</th>
+                                                                    <th className="p-2 text-left font-semibold">Location</th>
+                                                                    <th className="p-2 text-center font-semibold">Quantity</th>
+                                                                    <th className="p-2 text-right font-semibold">Actions</th>
+                                                                </tr></thead>
+                                                                <tbody>{op.items.map(item => (
+                                                                    <tr key={item.id} className="border-b border-gray-200 last:border-b-0 hover:bg-white">
+                                                                        <td className="p-2">{item.productName}</td>
+                                                                        <td className="p-2 font-mono">{item.sku}</td>
+                                                                        <td className="p-2 text-gray-600">{item.locationName}</td>
+                                                                        <td className={`p-2 font-bold text-center ${op.type === 'SALE_DISPATCHED' ? 'text-red-500' : 'text-green-600'}`}>
+                                                                            {op.type === 'SALE_DISPATCHED' ? '-' : '+'}{item.quantity}
+                                                                        </td>
+                                                                        <td className="p-2 text-right">
+                                                                            <Link to={`/history/${item.id}`} className="btn btn-xs btn-secondary">
+                                                                                <FileText size={14} className="mr-1"/> View Log
+                                                                            </Link>
+                                                                        </td>
+                                                                    </tr>
+                                                                ))}</tbody>
+                                                            </table>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </React.Fragment>
+                                    );
+                                })
+                            )}
+                        </tbody>
+                    </table>
                 </div>
             </div>
-
-            {/* --- Transaction Display --- */}
-            {paginatedTransactions.length > 0 ? (
-                isMobile ? (
-                    <div>{paginatedTransactions.map(group => <TransactionCard key={group.transactionId} txGroup={group} products={products} />)}</div>
-                ) : (
-                    <div className="card-table-wrapper">
-                        <table className="min-w-full text-sm"> 
-                            <thead className="bg-gray-50"><tr>
-                                <th className="p-3 text-left w-20"></th>
-                                <th className="p-3 text-left">Reference</th>
-                                <th className="p-3 text-left">Date</th>
-                                <th className="p-3 text-left">User</th>
-                                <th className="p-3 text-center">Items</th>
-                            </tr></thead>
-                            <tbody className="divide-y divide-gray-100">{paginatedTransactions.map(group => <TransactionRow key={group.transactionId} txGroup={group} products={products} />)}</tbody>
-                        </table>
-                    </div>
-                )
-            ) : (
-                <div className="card text-center p-8"><p className="text-gray-500">No transactions found for the selected filters.</p></div>
-            )}
-
-            {/* --- Pagination Controls --- */}
-            {totalPages > 1 && (
-                <div className="flex justify-between items-center mt-6">
-                    <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="btn btn-secondary">Previous</button>
-                    <span className="text-sm text-gray-500">Page {currentPage} of {totalPages}</span>
-                    <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="btn btn-secondary">Next</button>
-                </div>
-            )}
         </div>
     );
 };

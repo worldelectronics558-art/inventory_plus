@@ -58,8 +58,13 @@ const NewPurchaseInvoiceForm = () => {
     };
 
     const supplierOptions = useMemo(() => suppliers.map(s => ({ value: s.id, label: s.name })), [suppliers]);
-    const productOptions = useMemo(() => products.map(p => ({ value: p.sku, label: getProductDisplayName(p), purchasePrice: p.purchasePrice ?? 0 })), [products]);
-    const productsMap = useMemo(() => new Map(products.map(p => [p.sku, p])), [products]);
+    const productOptions = useMemo(() => products.map(p => ({ 
+        value: p.id, 
+        label: getProductDisplayName(p), 
+        sku: p.sku,  // Add SKU to the option object
+        purchasePrice: p.purchasePrice ?? 0 
+    })), [products]);
+    const productsMap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
 
     const handleItemChange = (index, field, value) => {
         const newItems = [...items];
@@ -126,16 +131,19 @@ const NewPurchaseInvoiceForm = () => {
             documentNumber,
             notes,
             items: items.map(item => {
+                // Use the productsMap to get full product details including the SKU [cite: 217]
                 const product = productsMap.get(item.productId.value);
-                if (!product) throw new Error(`Details for product with SKU ${item.productId.value} could not be found.`);
+                if (!product) throw new Error(`Product details not found.`);
+                
                 return {
-                    productId: item.productId.value,
+                    productId: item.productId.value, // The Firestore Document ID [cite: 217]
+                    sku: product.sku,                // CRITICAL: Explicitly save the SKU [cite: 218]
                     productName: getProductDisplayName(product),
                     quantity: Number(item.quantity),
-                    unitCostPrice: roundToTwo(Number(item.unitCostPrice)), 
-                    unitInvoicePrice: roundToTwo(Number(item.unitInvoicePrice)),       
-                    unitPurchaseGST: roundToTwo(Number(item.unitPurchaseGST)), 
-                };              
+                    unitCostPrice: roundToTwo(Number(item.unitCostPrice)),
+                    unitInvoicePrice: roundToTwo(Number(item.unitInvoicePrice)),
+                    unitPurchaseGST: roundToTwo(Number(item.unitPurchaseGST)),
+                };
             }),
             totalPreTax: roundToTwo(totals.totalPreTax), 
             totalTax: roundToTwo(totals.totalTax),

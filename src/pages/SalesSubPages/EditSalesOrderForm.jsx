@@ -30,7 +30,13 @@ const EditSalesOrderForm = () => {
     const [error, setError] = useState('');
 
     const customerOptions = useMemo(() => customers.map(c => ({ value: c.id, label: c.name })), [customers]);
-    const productOptions = useMemo(() => products.map(p => ({ value: p.sku, label: getProductDisplayName(p), salePrice: p.salePrice ?? 0 })), [products]);
+    const productOptions = useMemo(() => products.map(p => ({ 
+        value: p.id, // CHANGED from p.sku to p.id
+        label: getProductDisplayName(p), 
+        sku: p.sku,
+        salePrice: p.salePrice ?? 0 
+    })), [products]);
+    const productsMap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
 
     useEffect(() => {
         if (!isLoading && salesOrders.length > 0) {
@@ -46,7 +52,12 @@ const EditSalesOrderForm = () => {
                         unitSalePrice,
                         unitRetailPrice,
                         unitSaleGST,
-                        productId: productOptions.find(p => p.value === item.productId) || null,
+                        // Match using the Document ID (item.productId)
+                        productId: productOptions.find(p => p.value === item.productId) || {
+                            value: item.productId,
+                            label: item.productName,
+                            sku: item.sku
+                        },
                     };
                 });
 
@@ -114,40 +125,49 @@ const EditSalesOrderForm = () => {
         }, { totalPreTax: 0, totalTax: 0, grandTotal: 0 });
     }, [formState]);
 
+    // Around Line 195 in EditSalesOrderForm.jsx
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!formState.customerId || formState.items.some(item => !item.productId || !item.productId.value || Number(item.quantity) <= 0)) {
-            alert('Please select a customer and ensure all items have a selected product and a valid quantity greater than 0.');
+        if (!formState.customerId || formState.items.length === 0) {
+            setError("Please select a customer and add at least one item.");
             return;
         }
 
         const updatedOrderData = {
-            id: id,
+            // REMOVED 'id: id' to keep the document clean
             customerId: formState.customerId.value,
             customerName: formState.customerId.label,
             orderDate: new Date(formState.orderDate),
             documentNumber: formState.documentNumber,
             notes: formState.notes,
-            items: formState.items.map(item => ({
-                productId: item.productId.value,
-                productName: item.productName,
-                quantity: Number(item.quantity),
-                unitSalePrice: roundToTwo(Number(item.unitSalePrice)),
-                unitRetailPrice: roundToTwo(Number(item.unitRetailPrice)),
-                unitSaleGST: roundToTwo(Number(item.unitSaleGST)),
-                deliveredQty: item.deliveredQty || 0, // Preserve existing deliveredQty
-            })),
+            items: formState.items.map(item => {
+                // Retrieve the SKU from the productsMap
+                const product = productsMap.get(item.productId.value);
+                
+                return {
+                    productId: item.productId.value, // This is the Document ID
+                    sku: product?.sku || item.sku || '', // CRITICAL: Adds the SKU back
+                    productName: product ? getProductDisplayName(product) : item.productName,
+                    quantity: Number(item.quantity),
+                    unitSalePrice: roundToTwo(Number(item.unitSalePrice)),
+                    unitRetailPrice: roundToTwo(Number(item.unitRetailPrice)),
+                    unitSaleGST: roundToTwo(Number(item.unitSaleGST)),
+                    deliveredQty: item.deliveredQty || 0
+                };
+            }),
             totalPreTax: roundToTwo(totals.totalPreTax),
             totalTax: roundToTwo(totals.totalTax),
             totalAmount: roundToTwo(totals.grandTotal),
+            updatedAt: new Date() // Adds the missing timestamp [cite: 1, 2]
         };
 
         try {
-            await updateSalesOrder(id, updatedOrderData);
+            // Pass 'id' separately so it updates the correct doc but isn't saved as a field
+            await updateSalesOrder(id, updatedOrderData); 
             navigate('/sales');
-        } catch (error) {
-            console.error("Failed to update order:", error);
-            alert(`Error: ${error.message}`);
+        } catch (err) {
+            console.error("Error updating order:", err);
+            setError("Failed to update order. " + err.message);
         }
     };
     

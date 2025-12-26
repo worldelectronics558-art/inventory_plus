@@ -30,7 +30,13 @@ const EditPurchaseInvoiceForm = () => {
     const [error, setError] = useState('');
 
     const supplierOptions = useMemo(() => suppliers.map(s => ({ value: s.id, label: s.name })), [suppliers]);
-    const productOptions = useMemo(() => products.map(p => ({ value: p.sku, label: getProductDisplayName(p), purchasePrice: p.purchasePrice ?? 0 })), [products]);
+    const productOptions = useMemo(() => products.map(p => ({ 
+        value: p.id, // CHANGED from p.sku to p.id
+        label: getProductDisplayName(p), 
+        sku: p.sku, 
+        purchasePrice: p.purchasePrice ?? 0 
+    })), [products]);
+    const productsMap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
     
     useEffect(() => {
         if (!isLoading && purchaseInvoices && purchaseInvoices.length > 0) {
@@ -38,19 +44,18 @@ const EditPurchaseInvoiceForm = () => {
             if (invoiceToEdit) {
                 setInvoice(invoiceToEdit);
                 
-                const items = (invoiceToEdit.items || []).map(item => {
-                    const unitCostPrice = item.unitCostPrice ?? item.unitPrice ?? 0;
-                    const unitInvoicePrice = item.unitInvoicePrice ?? (unitCostPrice / (1 + GST_RATE));
-                    const unitPurchaseGST = item.unitPurchaseGST ?? (unitInvoicePrice * GST_RATE);
-                    return {
-                        ...item,
-                        unitCostPrice,
-                        unitInvoicePrice,
-                        unitPurchaseGST,
-                        // This is the key change: ensure productId is an object for the Select component
-                        productId: productOptions.find(p => p.value === item.productId) || null,
-                    };
-                });
+                const items = (invoiceToEdit.items || []).map(item => ({
+                    ...item,
+                    // Match the product option by comparing the stored productId (ID) to option.value (ID)
+                    productId: productOptions.find(p => p.value === item.productId) || { 
+                        value: item.productId, 
+                        label: item.productName,
+                        sku: item.sku 
+                    },
+                    unitCostPrice: item.unitCostPrice || 0,
+                    unitInvoicePrice: item.unitInvoicePrice || 0,
+                    unitPurchaseGST: item.unitPurchaseGST || 0
+                }));
 
                 if (items.length === 0) {
                     items.push({ productId: null, quantity: 1, unitCostPrice: 0, unitInvoicePrice: 0, unitPurchaseGST: 0 });
@@ -67,7 +72,7 @@ const EditPurchaseInvoiceForm = () => {
                 setError('Invoice not found. It may have been deleted.');
             }
         }
-    }, [id, purchaseInvoices, isLoading, supplierOptions, productOptions]);
+    }, [purchaseInvoices, products, suppliers, isLoading, supplierOptions, productOptions]);
 
     const handleItemChange = (index, field, value) => {
         const newItems = [...formState.items];
@@ -117,43 +122,52 @@ const EditPurchaseInvoiceForm = () => {
         }, { totalPreTax: 0, totalTax: 0, grandTotal: 0 });
     }, [formState]);
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        if (!formState.supplierId || formState.items.some(item => !item.productId || !item.productId.value || Number(item.quantity) <= 0)) {
-            alert('Please select a supplier and ensure all items have a selected product and a valid quantity greater than 0.');
-            return;
-        }
+    // Around Line 224 in EditPurchaseInvoiceForm.jsx
+const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!formState.supplierId || formState.items.length === 0) {
+        alert("Please select a supplier and add at least one item.");
+        return;
+    }
 
-        const updatedInvoiceData = {
-            id: id, // Pass the ID for the update function
-            supplierId: formState.supplierId.value,
-            supplierName: formState.supplierId.label,
-            invoiceDate: new Date(formState.invoiceDate),
-            documentNumber: formState.documentNumber,
-            notes: formState.notes,
-            items: formState.items.map(item => ({
-                // Explicitly define the object being saved
-                productId: item.productId.value,
-                productName: item.productName,
+    const updatedInvoiceData = {
+        // REMOVED 'id: id' from here so it's not saved inside the document
+        supplierId: formState.supplierId.value,
+        supplierName: formState.supplierId.label,
+        invoiceDate: new Date(formState.invoiceDate),
+        documentNumber: formState.documentNumber,
+        notes: formState.notes,
+        items: formState.items.map(item => {
+            // Retrieve the current product details from the map to get the SKU
+            const product = productsMap.get(item.productId.value);
+            
+            return {
+                productId: item.productId.value, // This is the Document ID
+                sku: product?.sku || item.sku || '', // CRITICAL: This adds the SKU back
+                productName: product ? getProductDisplayName(product) : item.productName,
                 quantity: Number(item.quantity),
                 unitCostPrice: roundToTwo(Number(item.unitCostPrice)),
                 unitInvoicePrice: roundToTwo(Number(item.unitInvoicePrice)),
                 unitPurchaseGST: roundToTwo(Number(item.unitPurchaseGST)),
-                receivedQty: item.receivedQty || 0 // Preserve existing receivedQty
-            })),
-            totalPreTax: roundToTwo(totals.totalPreTax),
-            totalTax: roundToTwo(totals.totalTax),
-            totalAmount: roundToTwo(totals.grandTotal),
-        };
-
-        try {
-            await updateInvoice(id, updatedInvoiceData);
-            navigate('/purchase');
-        } catch (error) {
-            console.error("Failed to update invoice:", error);
-            alert(`Error: ${error.message}`);
-        }
+                receivedQty: item.receivedQty || 0
+            };
+        }),
+        totalPreTax: roundToTwo(totals.totalPreTax),
+        totalTax: roundToTwo(totals.totalTax),
+        totalAmount: roundToTwo(totals.grandTotal),
+        updatedAt: new Date()
     };
+
+    try {
+        // Pass the 'id' separately to updateInvoice so it knows which doc to hit
+        // but doesn't include it in the 'updatedInvoiceData' payload
+        await updateInvoice(id, updatedInvoiceData); 
+        navigate('/purchase');
+    } catch (error) {
+        console.error("Error updating invoice:", error);
+        alert("Failed to update invoice.");
+    }
+};
     
     if (isLoading || !formState) {
         return <LoadingOverlay />;

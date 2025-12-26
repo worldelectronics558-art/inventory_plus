@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { doc, runTransaction, collection, serverTimestamp } from 'firebase/firestore';
+import { doc, increment, runTransaction, collection, serverTimestamp } from 'firebase/firestore';
 
 // --- Contexts ---
 import { useAuth } from '../../contexts/AuthContext';
@@ -11,6 +11,9 @@ import { usePendingReceivables } from '../../contexts/PendingReceivablesContext'
 import { useProducts } from '../../contexts/ProductContext';
 import { useLocations } from '../../contexts/LocationContext';
 import { useLoading } from '../../contexts/LoadingContext';
+
+// --- Constants ---
+import { EVENT_TYPES } from '../../constants/eventTypes';
 
 // --- Utils & Components ---
 import { getProductDisplayName } from '../../utils/productUtils';
@@ -66,50 +69,39 @@ const FinalizePurchaseInvoice = () => {
         setMutationDisabled(true);
 
         try {
+            // Generate a unique ID for this entire operation.
+            const operationId = doc(collection(db, 'dummy')).id;
+
             await runTransaction(db, async (transaction) => {
                 const invoiceRef = doc(db, `artifacts/${appId}/purchase_invoices`, invoiceId);
                 const productsCollectionRef = collection(db, `artifacts/${appId}/products`);
                 const receivablesCollectionRef = collection(db, `artifacts/${appId}/pending_receivables`);
                 const historyCollectionRef = collection(db, `artifacts/${appId}/item_history`);
-
-                // --- PHASE 1: READS ---
+        
                 const invoiceDoc = await transaction.get(invoiceRef);
-                if (!invoiceDoc.exists()) throw new Error("Invoice not found. It may have been deleted.");
-
+                if (!invoiceDoc.exists()) throw new Error("Invoice not found.");
+                const currentInvoiceData = invoiceDoc.data();
+        
                 const productIds = [...new Set(selectedUnits.map(u => u.productId))];
                 const receivableIds = [...new Set(selectedUnits.map(u => u.originalReceivableId))];
-
-                const productDocsPromise = productIds.map(id => transaction.get(doc(productsCollectionRef, id)));
-                const receivableDocsPromise = receivableIds.map(id => transaction.get(doc(receivablesCollectionRef, id)));
-                
-                const [productDocs, receivableDocs] = await Promise.all([Promise.all(productDocsPromise), Promise.all(receivableDocsPromise)]);
-
-                const productsData = productDocs.reduce((acc, doc) => {
-                    if(doc.exists()) acc[doc.id] = doc.data();
-                    return acc;
-                }, {});
-                
-                const receivablesData = receivableDocs.reduce((acc, doc) => {
-                    if(doc.exists()) acc[doc.id] = doc.data();
-                    return acc;
-                }, {});
-
-                // --- PHASE 2: PROCESS & PREPARE WRITES ---
-                const currentInvoiceData = invoiceDoc.data();
+        
+                const productDocs = await Promise.all(productIds.map(id => transaction.get(doc(productsCollectionRef, id))));
+                const receivableDocs = await Promise.all(receivableIds.map(id => transaction.get(doc(receivablesCollectionRef, id))));
+        
+                const productsData = productDocs.reduce((acc, doc) => { if (doc.exists()) acc[doc.id] = doc.data(); return acc; }, {});
+                const receivablesData = receivableDocs.reduce((acc, doc) => { if (doc.exists()) acc[doc.id] = doc.data(); return acc; }, {});
+        
                 const newInvoiceItems = JSON.parse(JSON.stringify(currentInvoiceData.items));
-
                 const stockSummaryUpdates = new Map();
                 const receivableUpdates = new Map();
-
+        
                 for (const unit of selectedUnits) {
-                    const invoiceItem = newInvoiceItems.find(i => i.productId === unit.sku);
-                    if (!invoiceItem) throw new Error(`SKU ${unit.sku} not found in this invoice.`);
-                    if (!productsData[unit.productId]) throw new Error(`Product data for ${unit.productId} could not be read.`);
+                    const invoiceItem = newInvoiceItems.find(i => i.sku === unit.sku);
+                    if (!invoiceItem) throw new Error(`Product SKU ${unit.sku} not found in invoice.`);
                     
                     const receivableData = receivablesData[unit.originalReceivableId];
-                    if (!receivableData) throw new Error(`Pending receivable doc ${unit.originalReceivableId} not found.`);
-
-                    // Create new Inventory Item
+                    if (!receivableData) throw new Error(`Receivable ${unit.originalReceivableId} not found.`);
+        
                     const inventoryItemRef = doc(collection(db, `artifacts/${appId}/inventory_items`));
                     transaction.set(inventoryItemRef, {
                         sku: unit.sku,
@@ -124,102 +116,69 @@ const FinalizePurchaseInvoice = () => {
                         invoiceId: invoiceId,
                         invoiceNumber: currentInvoiceData.invoiceNumber,
                         supplierName: currentInvoiceData.supplierName, 
-                        receivedAt: receivableData.createdAt, // Correctly use timestamp from batch
+                        receivedAt: receivableData.createdAt,
                         receivedBy: receivableData.createdBy,
                         authorizedAt: serverTimestamp(),
                         authorizedBy: { uid: userId, name: currentUser.displayName || 'N/A' },
                         ownerId: appId,
                     });
-
-                    // Create History Log
-                    const historyDocRef = doc(historyCollectionRef);
-                    transaction.set(historyDocRef, {
-                        type: "STOCK_AUTHORIZED",
+        
+                    transaction.set(doc(historyCollectionRef), {
+                        operationId: operationId, // <-- Attach operation ID
+                        type: EVENT_TYPES.PURCHASE_RECEIVED.key, // <-- Use constant
                         timestamp: serverTimestamp(),
                         user: { uid: userId, name: currentUser.displayName || 'N/A' },
                         inventoryItemId: inventoryItemRef.id,
                         productId: unit.productId,
                         sku: unit.sku,
-                        serial: unit.serial || null,
                         quantity: unit.quantity,
                         locationId: unit.locationId,
-                        context: {
-                            type: "PURCHASE_INVOICE",
-                            documentId: invoiceId,
-                            documentNumber: currentInvoiceData.invoiceNumber,
-                            supplierName: currentInvoiceData.supplierName,
-                            receivedBy: receivableData.createdBy,
-                        }
+                        context: { type: "PURCHASE_INVOICE", documentId: invoiceId, documentNumber: currentInvoiceData.invoiceNumber }
                     });
                     
-                    // Aggregate updates for pending receivables (new logic)
                     if (!receivableUpdates.has(unit.originalReceivableId)) {
-                        receivableUpdates.set(unit.originalReceivableId, {
-                            doc: receivableData,
-                            itemUpdates: new Map()
-                        });
+                        receivableUpdates.set(unit.originalReceivableId, { doc: receivableData, itemUpdates: new Map() });
                     }
                     const batchUpdate = receivableUpdates.get(unit.originalReceivableId);
                     if (!batchUpdate.itemUpdates.has(unit.productId)) {
                         batchUpdate.itemUpdates.set(unit.productId, { qtyTaken: 0, serialsTaken: new Set() });
                     }
                     const itemUpdate = batchUpdate.itemUpdates.get(unit.productId);
-                    if (unit.isSerialized) {
-                        itemUpdate.serialsTaken.add(unit.serial);
-                    } else {
-                        itemUpdate.qtyTaken += unit.quantity;
-                    }
+                    unit.isSerialized ? itemUpdate.serialsTaken.add(unit.serial) : (itemUpdate.qtyTaken += unit.quantity);
                     
-                    // Aggregate updates for product stock summaries
                     if (!stockSummaryUpdates.has(unit.productId)) {
                          stockSummaryUpdates.set(unit.productId, { doc: productsData[unit.productId], qtyChange: 0, locationChanges: new Map() });
                     }
                     const stockUpdate = stockSummaryUpdates.get(unit.productId);
                     stockUpdate.qtyChange += unit.quantity;
                     stockUpdate.locationChanges.set(unit.locationId, (stockUpdate.locationChanges.get(unit.locationId) || 0) + unit.quantity);
-
-                    // Update invoice item received quantity
+        
                     invoiceItem.receivedQty = (invoiceItem.receivedQty || 0) + unit.quantity;
                 }
-
-                // --- PHASE 3: APPLY AGGREGATED WRITES --- 
-
-                // Update Pending Receivables
+        
                 for (const [id, update] of receivableUpdates.entries()) {
-                    const receivableRef = doc(receivablesCollectionRef, id);
-                    const originalItems = update.doc.items;
-
-                    const newItems = originalItems.map(item => {
+                    const newItems = update.doc.items.map(item => {
                         const itemUpdate = update.itemUpdates.get(item.productId);
                         if (!itemUpdate) return item;
-
                         if (item.isSerialized) {
-                            const newSerials = item.serials.filter(s => !itemUpdate.serialsTaken.has(s));
-                            return { ...item, serials: newSerials, quantity: newSerials.length };
-                        } else {
-                            return { ...item, quantity: item.quantity - itemUpdate.qtyTaken };
+                            const filteredSerials = item.serials.filter(s => !itemUpdate.serialsTaken.has(s));
+                            return { ...item, serials: filteredSerials, quantity: filteredSerials.length };
                         }
+                        return { ...item, quantity: item.quantity - itemUpdate.qtyTaken };
                     }).filter(item => item.quantity > 0);
-
-                    if (newItems.length > 0) {
-                        transaction.update(receivableRef, { items: newItems });
-                    } else {
-                        transaction.delete(receivableRef);
-                    }
+        
+                    newItems.length > 0 ? transaction.update(doc(receivablesCollectionRef, id), { items: newItems }) : transaction.delete(doc(receivablesCollectionRef, id));
                 }
                 
-                // Update Product Summaries
                 for (const [productId, update] of stockSummaryUpdates.entries()) {
-                    const productRef = doc(productsCollectionRef, productId);
                     const newSummary = update.doc.stockSummary || { totalInStock: 0, byLocation: {} };
                     newSummary.totalInStock = (newSummary.totalInStock || 0) + update.qtyChange;
                     for(const [locId, qty] of update.locationChanges.entries()){
                        newSummary.byLocation[locId] = (newSummary.byLocation[locId] || 0) + qty;
                     }
-                    transaction.update(productRef, { stockSummary: newSummary });
+                    transaction.update(doc(productsCollectionRef, productId), { stockSummary: newSummary });
                 }
-
-                // Update Invoice
+        
                 const isFullyReceived = newInvoiceItems.every(item => item.receivedQty >= item.quantity);
                 transaction.update(invoiceRef, {
                     items: newInvoiceItems,
@@ -228,10 +187,10 @@ const FinalizePurchaseInvoice = () => {
                     lastUpdatedBy: { uid: userId, name: currentUser.displayName || 'N/A' },
                 });
             });
-
+        
             alert('Stock authorized and added to inventory successfully!');
             navigate('/purchase');
-
+        
         } catch (error) {
             console.error("A critical error occurred during finalization:", error);
             setError(`Error: ${error.message}`);
@@ -243,14 +202,13 @@ const FinalizePurchaseInvoice = () => {
     
     const relevantBatches = useMemo(() => {
         if (!invoiceForDisplay || !pendingReceivables) return {};
-        const invoiceSkus = new Set(invoiceForDisplay.items.map(item => item.productId));
+        const invoiceSkus = new Set(invoiceForDisplay.items.map(item => item.sku));
     
-        const relevantPRs = pendingReceivables.filter(batch => 
-            batch.items.some(item => invoiceSkus.has(item.sku))
-        );
+        const grouped = pendingReceivables.reduce((acc, batch) => {
+            const relevantItems = batch.items.filter(item => invoiceSkus.has(item.sku));
+            if (relevantItems.length === 0) return acc;
     
-        const grouped = relevantPRs.reduce((acc, batch) => {
-            const batchId = batch.batchId;
+            const batchId = batch.batchId || batch.id;
             if (!acc[batchId]) {
                 acc[batchId] = {
                     items: [],
@@ -260,45 +218,20 @@ const FinalizePurchaseInvoice = () => {
                 };
             }
     
-            batch.items.forEach(item => {
-                if (!invoiceSkus.has(item.sku)) return; // Only include items relevant to the invoice
-
+            relevantItems.forEach(item => {
                 const productInfo = productMap[item.productId] || {};
-                const commonData = {
-                    ...item,
-                    productName: getProductDisplayName(productInfo),
-                    locationName: locationMap[item.locationId] || 'Unknown Location',
-                    originalReceivableId: batch.id, // The ID of the batch document
-                    batchId: batchId,
-                    createdAt: batch.createdAt // FIX: Pass the timestamp object
-                };
-    
+                const commonData = { ...item, productName: getProductDisplayName(productInfo), locationName: locationMap[item.locationId] || 'Unknown Location', originalReceivableId: batch.id, batchId: batchId };
                 if (item.isSerialized) {
                     item.serials.forEach(serial => {
-                        acc[batchId].items.push({
-                            ...commonData,
-                            id: `${batch.id}-${item.productId}-${serial}`,
-                            quantity: 1,
-                            serial: serial
-                        });
+                        acc[batchId].items.push({ ...commonData, id: `${batch.id}-${item.sku}-${serial}`, quantity: 1, serial: serial });
                     });
                 } else {
-                    acc[batchId].items.push({
-                        ...commonData,
-                        id: `${batch.id}-${item.productId}`
-                    });
+                    acc[batchId].items.push({ ...commonData, id: `${batch.id}-${item.sku}` });
                 }
             });
-    
             return acc;
         }, {});
-    
-        return Object.keys(grouped).sort().reverse().reduce((obj, key) => {
-            if (grouped[key].items.length > 0) { // Only include batches that have relevant items
-                obj[key] = grouped[key];
-            }
-            return obj;
-        }, {});
+        return grouped;
     }, [invoiceForDisplay, pendingReceivables, productMap, locationMap]);
 
     useEffect(() => {
@@ -309,10 +242,8 @@ const FinalizePurchaseInvoice = () => {
     const fulfillmentSummary = useMemo(() => {
         const summary = {};
         if (!invoiceForDisplay) return summary;
-        invoiceForDisplay.items.forEach(item => { summary[item.productId] = { needed: item.quantity - (item.receivedQty || 0), selected: 0 }; });
-        Object.values(selectedStock).forEach(sel => {
-            if (summary[sel.item.sku]) { summary[sel.item.sku].selected += sel.quantity; }
-        });
+        invoiceForDisplay.items.forEach(item => { summary[item.sku] = { needed: item.quantity - (item.receivedQty || 0), selected: 0 }; });
+        Object.values(selectedStock).forEach(sel => { if (summary[sel.item.sku]) { summary[sel.item.sku].selected += sel.quantity; } });
         return summary;
     }, [selectedStock, invoiceForDisplay]);
 
@@ -330,11 +261,7 @@ const FinalizePurchaseInvoice = () => {
     };
     
     const toggleBatch = (batchId) => {
-        setOpenBatches(prev => {
-            const next = new Set(prev);
-            if (next.has(batchId)) { next.delete(batchId); } else { next.add(batchId); }
-            return next;
-        });
+        setOpenBatches(prev => { const next = new Set(prev); if (next.has(batchId)) { next.delete(batchId); } else { next.add(batchId); } return next; });
     };
 
     if (isLoading) return <LoadingSpinner>Loading Invoice Details...</LoadingSpinner>;
@@ -365,7 +292,7 @@ const FinalizePurchaseInvoice = () => {
                         <div className="divider my-1">Fulfillment Progress</div>
                         <ul className="space-y-3 my-4">
                             {invoiceForDisplay.items.map(item => {
-                                const summary = fulfillmentSummary[item.productId] || { needed: 0, selected: 0 };
+                                const summary = fulfillmentSummary[item.sku] || { needed: 0, selected: 0 };
                                 const received = item.receivedQty || 0;
                                 const finalQty = received + summary.selected;
                                 const total = item.quantity;
