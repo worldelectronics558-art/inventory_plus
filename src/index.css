@@ -111,7 +111,7 @@
       active:shadow-inner;
   }
   .btn-icon {
-    @apply p-2 text-gray-500 hover:bg-gray-100 rounded-full;
+    @apply p-2 rounded-full bg-white border border-secondary-700 text-secondary-700 hover:bg-secondary-50;
   }
   /* Sizes  */
   .btn-sm { @apply text-sm px-3 py-1.5; }

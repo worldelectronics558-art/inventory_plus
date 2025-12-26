@@ -1,29 +1,30 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import svgr from 'vite-plugin-svgr'; 
+import svgr from 'vite-plugin-svgr';
 import tailwindcss from '@tailwindcss/vite';
-import basicSsl from '@vitejs/plugin-basic-ssl';
+import fs from 'fs';
+import path from 'path';
 
 export default defineConfig({
-  plugins: [react(), svgr(), tailwindcss(), basicSsl()],
-  
-  // This block must be separated by a comma from the next property
+  plugins: [react(), svgr(), tailwindcss()],
+
   optimizeDeps: {
-    exclude: [
-      '@tauri-apps/api' // Exclude the entire Tauri API package
-    ]
-  }, // <-- COMMA ADDED HERE
-  
+    exclude: ['@tauri-apps/api']
+  },
+
   // --- Tauri/Vite Specific Config ---
   clearScreen: false,
   server: {
-    port: 1420, // Tauri's default frontend port
+    port: 1420,
     strictPort: true,
-    host: true, // Needed for Tauri to access the dev server
-    hmr: {
-      protocol: 'wss', // Use WebSocket Secure
+    host: true, // Listen on all network interfaces
+    https: {
+      key: fs.readFileSync(path.resolve(__dirname, 'src-tauri/certs/key.pem')),
+      cert: fs.readFileSync(path.resolve(__dirname, 'src-tauri/certs/cert.pem')),
     },
-    https: true, // Enable HTTPS
+    hmr: {
+      protocol: 'wss',
+    },
   },
   // --- END Config ---
 });

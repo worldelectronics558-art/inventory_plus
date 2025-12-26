@@ -1,5 +1,6 @@
 import React from 'react';
-import { Menu, ChevronsRight, ChevronsLeft } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Menu, ChevronsRight, ChevronsLeft, ArrowLeft, ArrowRight } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useUser } from '../contexts/UserContext.jsx';
 
@@ -12,12 +13,12 @@ import { useUser } from '../contexts/UserContext.jsx';
  * @param {function} props.onOpenMobileMenu - Function to open the sidebar drawer on mobile.
  */
 const Header = ({ isSidebarCollapsed, isDesktop, onToggleCollapse, onOpenMobileMenu }) => {
+    const navigate = useNavigate();
     const { currentUser: currentUserProfile } = useUser();
     const { isAuthenticated, userId } = useAuth();
 
     const userDisplayName = currentUserProfile?.displayName || currentUserProfile?.email || userId;
 
-    // Determine the left padding based on sidebar state on desktop only
     const sidebarWidthClass = isDesktop ? (isSidebarCollapsed ? 'md:pl-16' : 'md:pl-64') : 'pl-0';
 
     const handleToggleClick = () => {
@@ -39,14 +40,28 @@ const Header = ({ isSidebarCollapsed, isDesktop, onToggleCollapse, onOpenMobileM
 
     return (
         <header className={`fixed top-0 left-0 right-0 z-30 h-16 bg-primary-900 shadow-md flex items-center justify-between transition-all duration-300 ${sidebarWidthClass}`}>
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center">
+                {/* Sidebar Toggle */}
                 <button 
                     onClick={handleToggleClick}
-                    className="p-2 ml-4 text-secondary-700 rounded-md hover:bg-secondary-700/20 focus:outline-none focus:ring-2 focus:ring-secondary-700 transition-colors"
+                    className="p-2 ml-4 text-white rounded-md hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-white transition-colors"
                     aria-label={isDesktop ? (isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar") : "Open Menu"}
                 >
                     {getToggleIcon()}
                 </button>
+
+                {/* Vertical Divider */}
+                <div className="h-6 w-px bg-white/20 ml-3 mr-1"></div>
+
+                {/* History Navigation Buttons */}
+                <div className="flex items-center gap-1">
+                    <button onClick={() => navigate(-1)} className="p-2 text-white rounded-md hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-white transition-colors" aria-label="Go back">
+                        <ArrowLeft size={20} />
+                    </button>
+                    <button onClick={() => navigate(1)} className="p-2 text-white rounded-md hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-white transition-colors" aria-label="Go forward">
+                        <ArrowRight size={20} />
+                    </button>
+                </div>
             </div>
 
             <div className="flex items-center space-x-4 pr-4">
