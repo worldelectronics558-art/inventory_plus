@@ -1,4 +1,3 @@
-
 // src/components/Sidebar.jsx
 
 import React, { useState } from 'react';
@@ -25,23 +24,24 @@ const Sidebar = ({ isCollapsed, isDesktop, isMobileMenuOpen, onCloseMobileMenu }
     const location = useLocation();
 
     const { userPermissions } = useUser();
-    const { isOnline, isNetworkAvailable, goOnline, goOffline, signOut, isAuthenticated } = useAuth();
+    // Removed goOffline from useAuth()
+    const { isOnline, isNetworkAvailable, goOnline, signOut, isAuthenticated } = useAuth();
     const [connectionError, setConnectionError] = useState('');
     const [openSubmenu, setOpenSubmenu] = useState(null);
 
+    // Simplified handler: only handles the action of going online.
     const handleConnectionClick = async () => {
-        if (!isAuthenticated) return;
+        if (!isAuthenticated || isOnline) return; // Only allow action if offline
+        
         setConnectionError('');
-        if (isOnline) {
-            if (window.confirm("Are you sure you want to switch to OFFLINE mode?")) {
-                goOffline();
+        if (isNetworkAvailable) {
+            try {
+                await goOnline();
+            } catch (error) {
+                setConnectionError(error.message);
             }
         } else {
-            if (isNetworkAvailable) {
-                try { await goOnline(); } catch (error) { setConnectionError(error.message); }
-            } else {
-                setConnectionError("No network connection available.");
-            }
+            setConnectionError("No network connection available.");
         }
     };
 
@@ -95,17 +95,19 @@ const Sidebar = ({ isCollapsed, isDesktop, isMobileMenuOpen, onCloseMobileMenu }
                 <div className={`p-2 ${finalIsCollapsed ? 'px-1' : ''}`}>
                      <button
                         onClick={handleConnectionClick}
-                        disabled={!isAuthenticated}
+                        // Disable the button if the user isn't authenticated or is already online
+                        disabled={!isAuthenticated || isOnline}
                         className={`flex items-center w-full py-3 text-sm rounded-lg transition-all duration-300 font-semibold text-white
-                            ${isOnline ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}
-                            ${!isAuthenticated ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                            ${isOnline ? 'bg-green-600' : 'bg-red-600 hover:bg-red-700'} 
+                            ${!isAuthenticated || isOnline ? 'opacity-75 cursor-not-allowed' : 'cursor-pointer'} 
                             ${finalIsCollapsed ? 'justify-center px-0' : 'justify-between px-4'}`}
                     >
                         <div className="flex items-center">
                             {isOnline ? <Cloud className="w-4 h-4" /> : <CloudOff className="w-4 h-4" />}
                             {!finalIsCollapsed && <span className='ml-2'>Status: {isOnline ? 'Online' : 'Offline'}</span>}
                         </div>
-                        {!finalIsCollapsed && <div>{isOnline ? 'Go Offline' : 'Go Online'}</div>}
+                        {/* Only show the "Go Online" text when offline and not collapsed */}
+                        {!finalIsCollapsed && !isOnline && <div>Go Online</div>}
                     </button>
                     {connectionError && !finalIsCollapsed && (
                         <div className="mx-2 my-2 p-2 bg-red-800/90 rounded-lg shadow-inner text-white text-xs">
