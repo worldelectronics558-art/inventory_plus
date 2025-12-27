@@ -4,30 +4,28 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { auth, db } from '../firebase/firebase-config.js'; 
 import { 
     onAuthStateChanged, 
-    signInWithCustomToken, 
     signOut as firebaseSignOut, 
     signInWithEmailAndPassword 
 } from 'firebase/auth';
-import { invoke as tauriInvoke } from '@tauri-apps/api/core'; 
 import localforage from 'localforage'; 
 
 // --- LocalForage Store for Offline Credentials ---
 const CREDENTIALS_KEY = 'offlineUserCreds';
 const ALL_USERS_KEY = 'allOfflineUsers';
 
-// ----------------------------------------------------------------------
+// CORRECT: Define appId at the top level
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null; 
-const isTauriAvailable = typeof tauriInvoke === 'function' && tauriInvoke !== null;
 
-// 1. Context Setup
 const AuthContext = createContext({
     userId: null,
     isAuthenticated: false,
     authReady: false,
-    appId: appId,
     isOnline: false,
     isNetworkAvailable: true,
+    // CORRECT: Add back the missing values to the default context
+    auth: null,
+    db: null,
+    appId: appId,
     goOnline: () => {}, 
     signOut: () => {}, 
     signIn: () => {}, 
@@ -41,11 +39,16 @@ export const AuthProvider = ({ children }) => {
     const [authReady, setAuthReady] = useState(false);
     const [isNetworkAvailable, setIsNetworkAvailable] = useState(navigator.onLine);
 
-    // --- 1. Network Listener ---
-    // This effect now solely manages the network availability flag.
+    // --- 1. Network Status Listener ---
     useEffect(() => {
-        const handleOnline = () => setIsNetworkAvailable(true);
-        const handleOffline = () => setIsNetworkAvailable(false);
+        const handleOnline = () => {
+            console.log("NETWORK: Status changed to ONLINE");
+            setIsNetworkAvailable(true);
+        }
+        const handleOffline = () => {
+            console.log("NETWORK: Status changed to OFFLINE");
+            setIsNetworkAvailable(false);
+        }
 
         window.addEventListener('online', handleOnline);
         window.addEventListener('offline', handleOffline);
@@ -54,70 +57,43 @@ export const AuthProvider = ({ children }) => {
             window.removeEventListener('online', handleOnline);
             window.removeEventListener('offline', handleOffline);
         };
-    }, []); 
+    }, []);
 
-    // --- 2. Core Auth Logic ---
+    // --- 2. Initial Auth & Firebase Listener (Runs once on mount) ---
     useEffect(() => {
         let isMounted = true;
 
-        // Function to automatically sign in when network is available
-        const autoSignIn = async () => {
-            if (isNetworkAvailable && !auth.currentUser) {
-                const offlineUser = await localforage.getItem(CREDENTIALS_KEY);
-                if (offlineUser && offlineUser.email && offlineUser.password) {
-                    try {
-                        console.log("Network is back. Attempting auto sign-in...");
-                        await signInWithEmailAndPassword(auth, offlineUser.email, offlineUser.password);
-                    } catch (error) {
-                        console.error("Auto sign-in failed:", error);
-                    }
-                }
+        const initializeAuth = async () => {
+            const localUser = await localforage.getItem(CREDENTIALS_KEY);
+            if (isMounted && localUser) {
+                console.log("AUTH INIT: Found local user. Setting state for offline mode.");
+                setUserId(localUser.uid);
+                setIsAuthenticated(true);
+            }
+
+            if (isMounted) {
+                console.log("AUTH INIT: Context is ready. App can now render.");
+                setAuthReady(true);
             }
         };
-        
-        // Automatically try to sign in when the network comes online
-        autoSignIn();
 
-        // This is the primary listener for Firebase's auth state.
-        const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+        initializeAuth();
+
+        const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
             if (!isMounted) return;
 
             if (firebaseUser) {
-                // Scenario: User is authenticated with Firebase. We are online.
-                setUserId(firebaseUser.uid);
-                setIsAuthenticated(true);
+                console.log("FIREBASE: User is signed in (ONLINE). UID:", firebaseUser.uid);
+                if (!isAuthenticated) setIsAuthenticated(true);
+                if (userId !== firebaseUser.uid) setUserId(firebaseUser.uid);
             } else {
-                // Scenario: User is not authenticated with Firebase.
-                // This could be because we are offline OR the user truly signed out.
-                const offlineUser = await localforage.getItem(CREDENTIALS_KEY);
-                if (offlineUser) {
-                    // If we have cached credentials, the user is authenticated for offline use.
-                    setUserId(offlineUser.uid);
-                    setIsAuthenticated(true);
-                } else {
-                    // No cached credentials means the user is fully signed out.
-                    setUserId(null);
-                    setIsAuthenticated(false);
-                }
-            }
-
-            // Ensure the app readiness is set only once.
-            if (!authReady) {
-                 // On first load, also check for Tauri offline data
-                 if (isTauriAvailable) { 
-                    try {
-                        const offlineData = await tauriInvoke('load_offline_auth');
-                        if(offlineData && offlineData.user_id) {
-                            setUserId(offlineData.user_id);
-                            setIsAuthenticated(true);
-                            console.log("TAURI OFFLINE: Loaded session from disk for UID:", offlineData.user_id);
-                        }
-                    } catch (e) {
-                        console.log("TAURI OFFLINE: No valid offline session found or error loading it.");
+                localforage.getItem(CREDENTIALS_KEY).then(user => {
+                    if (!user) {
+                        console.log("FIREBASE: No user and no local creds. Setting unauthenticated.");
+                        setIsAuthenticated(false);
+                        setUserId(null);
                     }
-                }
-                console.log("USER CONTEXT: Auth check complete. App is ready.");
-                setAuthReady(true);
+                });
             }
         });
 
@@ -125,111 +101,103 @@ export const AuthProvider = ({ children }) => {
             isMounted = false;
             unsubscribe();
         };
-    }, [isNetworkAvailable, authReady]); // Re-run when network status changes
-    
-    // --- 3. Manual "Go Online" Handler ---
-    // This is now the only manual connection function.
+    }, []); // Runs only once.
+
+    // --- 3. Auto Sign-In Effect (Runs when network status changes) ---
+    useEffect(() => {
+        const autoSignIn = async () => {
+            if (isNetworkAvailable && !auth.currentUser) {
+                const localUser = await localforage.getItem(CREDENTIALS_KEY);
+                if (localUser && localUser.email && localUser.password) {
+                    console.log("NETWORK ONLINE: Attempting auto sign-in...");
+                    try {
+                        await signInWithEmailAndPassword(auth, localUser.email, localUser.password);
+                        console.log("NETWORK ONLINE: Auto sign-in successful.");
+                    } catch (error) {
+                        console.error("NETWORK ONLINE: Auto sign-in failed:", error.message);
+                    }
+                }
+            }
+        };
+
+        autoSignIn();
+    }, [isNetworkAvailable]);
+
+    // --- 4. Handlers ---
     const goOnline = useCallback(async () => {
         if (!isNetworkAvailable) {
             throw new Error("No network connection available.");
         }
         const offlineUser = await localforage.getItem(CREDENTIALS_KEY);
         if (!offlineUser || !offlineUser.email || !offlineUser.password) {
-            throw new Error("No cached credentials available to go online.");
+            throw new Error("No cached credentials to go online.");
         }
 
         try {
             await signInWithEmailAndPassword(auth, offlineUser.email, offlineUser.password);
         } catch (error) {
-            console.error("GO ONLINE FAILED (Firebase login):", error);
+            console.error("GO ONLINE FAILED:", error);
             throw new Error(`Connection failed: ${error.message}`);
         }
     }, [isNetworkAvailable]);
 
-    // --- 4. Sign In Handler (Used for Login Page) ---
     const signIn = useCallback(async (email, password) => {
-        if (!authReady) {
-            throw new Error("Application is not ready yet.");
-        }
-        
-        // Always try to sign in online first if network is available
+        if (!authReady) throw new Error("Application not ready.");
+
         if (isNetworkAvailable) {
             try {
-                const userCredential = await signInWithEmailAndPassword(auth, email, password);
-                const uid = userCredential.user.uid;
-    
-                const userData = { uid, email, password, lastLogin: Date.now() };
+                const cred = await signInWithEmailAndPassword(auth, email, password);
+                const userData = { uid: cred.user.uid, email, password };
                 await localforage.setItem(CREDENTIALS_KEY, userData);
-    
                 let allUsers = await localforage.getItem(ALL_USERS_KEY) || {};
-                allUsers[uid] = userData;
+                allUsers[cred.user.uid] = userData;
                 await localforage.setItem(ALL_USERS_KEY, allUsers);
-                
-                if (isTauriAvailable) {
-                    const authToken = await userCredential.user.getIdToken();
-                    try {
-                        await tauriInvoke('save_offline_auth', { userId: uid, authToken: authToken });
-                    } catch(e) {
-                        console.error("Failed to save offline auth to Tauri disk:", e);
-                    }
-                }
-                
-                return uid;
+                return cred.user.uid;
             } catch (onlineError) {
-                 // If online fails, proceed to offline check
-                 console.warn("Online login failed, checking offline cache.", onlineError);
+                console.warn("Online login failed, checking cache.", onlineError);
             }
         }
 
-        // Offline login check
         const allUsers = await localforage.getItem(ALL_USERS_KEY) || {};
         const cachedUser = Object.values(allUsers).find(u => u.email === email && u.password === password);
 
         if (cachedUser) {
             setUserId(cachedUser.uid);
             setIsAuthenticated(true);
-            await localforage.setItem(CREDENTIALS_KEY, cachedUser); // Set as current user
-            console.log("OFFLINE LOGIN SUCCESS: Authenticated against local cache.");
+            await localforage.setItem(CREDENTIALS_KEY, cachedUser);
+            console.log("OFFLINE LOGIN: Authenticated against local cache.");
             return cachedUser.uid;
         }
         
         throw new Error("Login failed. Check credentials or internet connection.");
     }, [authReady, isNetworkAvailable]);
     
-    // --- 5. Sign Out Handler ---
     const signOut = useCallback(async () => {
-        // Crucially, remove credentials first. This tells the onAuthStateChanged
-        // listener that this is a deliberate sign-out.
+        console.log("SIGN OUT: Clearing local credentials.");
         await localforage.removeItem(CREDENTIALS_KEY);
         
-        try {
-            if (auth.currentUser) {
-                 await firebaseSignOut(auth);
-            }
-        } catch (error) {
-            console.error("SIGN OUT ERROR:", error);
+        if (auth.currentUser) {
+            await firebaseSignOut(auth);
+            console.log("SIGN OUT: Firebase sign-out successful.");
         }
-        
-        // The onAuthStateChanged listener will handle setting user/auth state to null/false
-        console.log("SIGN OUT: User signed out, credentials cache cleared.");
     }, []);
     
-    // The app is "online" if the network is available AND we have an active Firebase user.
     const isOnline = isNetworkAvailable && auth.currentUser != null;
 
     return (
-        <AuthContext.Provider value={{ 
+        <AuthContext.Provider value={{
             userId, 
             isAuthenticated, 
             authReady, 
-            auth, 
-            db, 
-            appId,
             isOnline,
             isNetworkAvailable,
             goOnline, 
             signOut, 
-            signIn 
+            signIn, 
+            // CORRECT: Added the required values back to the provider
+            auth,
+            db,
+            appId
         }}>
             {children}
         </AuthContext.Provider>
