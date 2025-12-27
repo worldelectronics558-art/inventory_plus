@@ -3,7 +3,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import localforage from 'localforage';
-import { collection, query, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, setDoc, updateDoc, deleteDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from './AuthContext';
 
 // --- LocalForage Store Setup ---
@@ -64,13 +64,40 @@ export const CustomerProvider = ({ children }) => {
 
         return () => unsubscribe();
     }, [appId, authReady, db, isOnline, getCustomersCollectionRef]);
+    
+    // --- ID GENERATION ---
+    const getNextCustomerId = async () => {
+        if (!db || !appId) throw new Error("Database not configured");
+        const counterRef = doc(db, 'artifacts', appId, 'counters', 'customerCounter');
+
+        try {
+            const newIdNumber = await runTransaction(db, async (transaction) => {
+                const counterDoc = await transaction.get(counterRef);
+                let nextId = 1;
+                if (counterDoc.exists()) {
+                    nextId = counterDoc.data().currentId + 1;
+                }
+                transaction.set(counterRef, { currentId: nextId }, { merge: true });
+                return nextId;
+            });
+            return `CUS-${newIdNumber.toString().padStart(3, '0')}`;
+        } catch (error) {
+            console.error("Error generating new customer ID: ", error);
+            throw new Error("Failed to generate a unique customer ID.");
+        }
+    };
+
 
     // --- CRUD FUNCTIONS ---
     const addCustomer = async (customerData) => {
         if (!isOnline) throw new Error("Customers can only be added while online.");
         const colRef = getCustomersCollectionRef();
-        await addDoc(colRef, {
+        const customerId = await getNextCustomerId();
+        const docRef = doc(colRef, customerId);
+
+        await setDoc(docRef, {
             ...customerData,
+            customerId: customerId,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
         });

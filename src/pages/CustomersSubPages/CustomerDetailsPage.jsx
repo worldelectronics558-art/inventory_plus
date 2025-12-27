@@ -2,21 +2,45 @@
 // src/pages/customersSubPages/CustomerDetailsPage.jsx
 
 import React from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useCustomers } from '../../contexts/CustomerContext';
 import { useSalesOrders } from '../../contexts/SalesOrderContext';
-import { ArrowLeft, Edit, Mail, Phone, MapPin, User, Star, ShoppingBag } from 'lucide-react';
+import { useLoading } from '../../contexts/LoadingContext';
+import { ArrowLeft, Edit, Trash2, Mail, Phone, MapPin, User, Star, ShoppingBag } from 'lucide-react';
 
 const CustomerDetailsPage = () => {
     const { id } = useParams();
-    const { customers } = useCustomers();
+    const navigate = useNavigate();
+    const { customers, deleteCustomer } = useCustomers();
     const { salesOrders } = useSalesOrders();
+    const { setAppProcessing } = useLoading();
 
     const customer = customers.find(c => c.id === id);
     const customerOrders = salesOrders.filter(order => order.customerId === id);
 
     const totalOrders = customerOrders.length;
-    const lifetimeValue = customerOrders.reduce((sum, order) => sum + order.total, 0);
+    const lifetimeValue = customerOrders.reduce((sum, order) => sum + (order.total || 0), 0);
+
+    const handleDelete = async () => {
+        const hasSales = salesOrders.some(order => order.customerId === id);
+        if (hasSales) {
+            alert('Cannot delete this customer because they have existing sales orders. Please delete their orders first.');
+            return;
+        }
+
+        if (window.confirm('Are you sure you want to delete this customer? This action cannot be undone.')) {
+            setAppProcessing(true, 'Deleting customer...');
+            try {
+                await deleteCustomer(id);
+                navigate('/customers');
+            } catch (error) {
+                console.error('Failed to delete customer:', error);
+                alert(`Error: ${error.message}`);
+            } finally {
+                setAppProcessing(false);
+            }
+        }
+    };
 
     if (!customer) {
         return (
@@ -42,9 +66,13 @@ const CustomerDetailsPage = () => {
                     <h1 className="page-title">{customer.name}</h1>
                 </div>
                 <div className="page-actions">
-                    <button className="btn btn-primary">
+                    <Link to={`/customers/${id}/edit`} className="btn btn-white">
                         <Edit size={16} className="mr-2"/>
-                        Edit Customer
+                        Edit
+                    </Link>
+                    <button className="btn btn-danger" onClick={handleDelete}>
+                        <Trash2 size={16} className="mr-2" />
+                        Delete
                     </button>
                 </div>
             </header>
@@ -87,7 +115,7 @@ const CustomerDetailsPage = () => {
                                                         {order.status}
                                                     </span>
                                                 </td>
-                                                <td className="p-3 text-right whitespace-nowrap">${order.total.toFixed(2)}</td>
+                                                <td className="p-3 text-right whitespace-nowrap">${(order.total || 0).toFixed(2)}</td>
                                             </tr>
                                         ))}
                                     </tbody>

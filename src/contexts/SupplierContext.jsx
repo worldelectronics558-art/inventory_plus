@@ -6,8 +6,8 @@ import { useAuth } from './AuthContext';
 import {
     collection,
     onSnapshot,
-    addDoc,
     doc,
+    setDoc,
     updateDoc,
     deleteDoc,
     runTransaction,
@@ -67,13 +67,16 @@ export const SupplierProvider = ({ children }) => {
     const addSupplier = useCallback(async (supplierData) => {
         if (!db || !appId) throw new Error("Database not configured");
         const suppliersCollectionRef = collection(db, 'artifacts', appId, 'suppliers');
-        const newId = await getNextSupplierId();
+        const supplierId = await getNextSupplierId();
+        const docRef = doc(suppliersCollectionRef, supplierId);
+
         const newSupplier = {
             ...supplierData,
-            displayId: newId,
+            supplierId: supplierId,
             createdAt: serverTimestamp(),
         };
-        return await addDoc(suppliersCollectionRef, newSupplier);
+        await setDoc(docRef, newSupplier);
+
     }, [db, appId]);
 
     const updateSupplier = useCallback(async (id, updatedData) => {

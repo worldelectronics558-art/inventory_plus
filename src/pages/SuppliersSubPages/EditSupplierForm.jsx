@@ -1,6 +1,4 @@
 
-// src/pages/PurchasingSubPages/EditSupplierForm.jsx
-
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, Save } from 'lucide-react';
@@ -43,7 +41,7 @@ const EditSupplierForm = () => {
     };
 
     if (!supplier) {
-        return <div>Loading...</div>; // Or a proper loading spinner
+        return <div>Loading...</div>; 
     }
 
     return (
@@ -60,44 +58,81 @@ const EditSupplierForm = () => {
 
             <div className="page-content">
                 <form onSubmit={handleSubmit}>
-                    <div className="card p-6">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                            {/* All fields from NewSupplierForm, pre-filled with supplier data */}
-                            <div>
-                                <label htmlFor="name">Supplier Name</label>
-                                <input type="text" name="name" id="name" value={supplier.name} onChange={handleChange} required />
+                    <div className="space-y-8">
+                        {/* Supplier Information Section */}
+                        <div className="form-section">
+                            <div className="form-section-title">
+                                <h3>Supplier Information</h3>
+                                <p>Update the main details for the supplier.</p>
                             </div>
-                             <div>
-                                <label htmlFor="email">Email</label>
-                                <input type="email" name="email" id="email" value={supplier.email} onChange={handleChange} />
+                            <div className="form-section-content">
+                                <div className="card p-6">
+                                    <div className="grid grid-cols-1 gap-6">
+                                        <div>
+                                            <label htmlFor="name">Supplier Name</label>
+                                            <input type="text" name="name" id="name" value={supplier.name} onChange={handleChange} required />
+                                        </div>
+                                        <div>
+                                            <label htmlFor="email">Email Address</label>
+                                            <input type="email" name="email" id="email" value={supplier.email} onChange={handleChange} />
+                                        </div>
+                                        <div>
+                                            <label htmlFor="address">Address</label>
+                                            <textarea name="address" id="address" rows="3" value={supplier.address} onChange={handleChange}></textarea>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
-                            <div>
-                                <label htmlFor="primaryContactPerson">Primary Contact Person</label>
-                                <input type="text" name="primaryContactPerson" id="primaryContactPerson" value={supplier.primaryContactPerson} onChange={handleChange} />
+                        </div>
+
+                        {/* Contact Person Section */}
+                        <div className="form-section">
+                            <div className="form-section-title">
+                                <h3>Contact Persons</h3>
+                                <p>Update key contact information for communication and orders.</p>
                             </div>
-                            <div>
-                                <label htmlFor="primaryContactNumber">Primary Contact #</label>
-                                <input type="tel" name="primaryContactNumber" id="primaryContactNumber" value={supplier.primaryContactNumber} onChange={handleChange} />
+                            <div className="form-section-content">
+                                <div className="card p-6">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                        <div>
+                                            <label htmlFor="primaryContactPerson">Primary Contact Person</label>
+                                            <input type="text" name="primaryContactPerson" id="primaryContactPerson" value={supplier.primaryContactPerson} onChange={handleChange} />
+                                        </div>
+                                        <div>
+                                            <label htmlFor="primaryContactNumber">Primary Contact #</label>
+                                            <input type="tel" name="primaryContactNumber" id="primaryContactNumber" value={supplier.primaryContactNumber} onChange={handleChange} />
+                                        </div>
+                                        <div>
+                                            <label htmlFor="secondaryContactPerson">Secondary Contact Person</label>
+                                            <input type="text" name="secondaryContactPerson" id="secondaryContactPerson" value={supplier.secondaryContactPerson} onChange={handleChange} />
+                                        </div>
+                                        <div>
+                                            <label htmlFor="secondaryContactNumber">Secondary Contact #</label>
+                                            <input type="tel" name="secondaryContactNumber" id="secondaryContactNumber" value={supplier.secondaryContactNumber} onChange={handleChange} />
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
-                           <div>
-                                <label htmlFor="secondaryContactPerson">Secondary Contact Person</label>
-                                <input type="text" name="secondaryContactPerson" id="secondaryContactPerson" value={supplier.secondaryContactPerson} onChange={handleChange} />
+                        </div>
+
+                        {/* Additional Information Section */}
+                        <div className="form-section">
+                            <div className="form-section-title">
+                                <h3>Additional Information</h3>
+                                <p>Use this section for internal notes or special instructions related to this supplier.</p>
                             </div>
-                            <div>
-                                <label htmlFor="secondaryContactNumber">Secondary Contact #</label>
-                                <input type="tel" name="secondaryContactNumber" id="secondaryContactNumber" value={supplier.secondaryContactNumber} onChange={handleChange} />
-                            </div>
-                             <div>
-                                <label htmlFor="address">Address</label>
-                                <textarea name="address" id="address" rows="3" value={supplier.address} onChange={handleChange}></textarea>
-                            </div>
-                            <div>
-                                <label htmlFor="notes">Notes</label>
-                                <textarea name="notes" id="notes" rows="3" value={supplier.notes} onChange={handleChange}></textarea>
+                            <div className="form-section-content">
+                                <div className="card p-6">
+                                    <div>
+                                        <label htmlFor="notes">Notes</label>
+                                        <textarea name="notes" id="notes" rows="4" value={supplier.notes} onChange={handleChange}></textarea>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
 
+                    {/* Form Actions */}
                     <div className="mt-8 pt-5 border-t border-gray-200 flex justify-end gap-3">
                          <Link to={`/suppliers/${id}`} className="btn btn-white">
                             Cancel

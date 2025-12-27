@@ -1,6 +1,4 @@
 
-// src/App.jsx
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { Routes, Route } from 'react-router-dom';
 
@@ -23,7 +21,7 @@ import CustomersPage from './pages/CustomersPage.jsx';
 import HistoryPage from './pages/HistoryPage.jsx';
 import SettingsPage from './pages/SettingsPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
-import LogDetailsPage from './pages/HistorySubPages/LogDetailsPage.jsx'; // <-- IMPORT NEW PAGE
+import LogDetailsPage from './pages/HistorySubPages/LogDetailsPage.jsx';
 
 // Purchase Pages
 import PurchasePage from './pages/PurchasePage.jsx'; 
@@ -50,6 +48,7 @@ import PendingDeliverablesPage from './pages/SalesSubPages/PendingDeliverablesPa
 // Customer Sub-Pages
 import CustomerDetailsPage from './pages/CustomersSubPages/CustomerDetailsPage.jsx';
 import NewCustomerForm from './pages/CustomersSubPages/NewCustomerForm.jsx';
+import EditCustomerForm from './pages/CustomersSubPages/EditCustomerForm.jsx';
 
 // Products Sub-Pages
 import AddProductForm from './pages/ProductsSubPages/AddProductForm.jsx';
@@ -142,9 +141,10 @@ const AppContent = () => {
                     <Route path="/customers" element={<CustomersPage />} />
                     <Route path="/customers/new" element={<NewCustomerForm />} />
                     <Route path="/customers/:id" element={<CustomerDetailsPage />} />
+                    <Route path="/customers/:id/edit" element={<EditCustomerForm />} />
                     
                     <Route path="/history" element={<HistoryPage />} />
-                    <Route path="/history/:logId" element={<LogDetailsPage />} /> {/* <-- ADD NEW ROUTE */}
+                    <Route path="/history/:logId" element={<LogDetailsPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
                     <Route path="*" element={<div className="p-8 text-2xl text-red-500">404 Page Not Found</div>} />
                 </Routes>
