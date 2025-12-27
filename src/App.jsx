@@ -56,6 +56,14 @@ import EditProductForm from './pages/ProductsSubPages/EditProductForm.jsx';
 import ProductsImportForm from './pages/ProductsSubPages/ProductsImportForm.jsx';
 import ProductDetailsPage from './pages/ProductsSubPages/ProductDetailsPage.jsx';
 
+// Reports Pages
+import ReportsPage from './pages/ReportsPage.jsx';
+import InventorySummaryReport from './pages/ReportsSubPages/InventorySummaryReport.jsx';
+import InventoryMovementReport from './pages/ReportsSubPages/InventoryMovementReport.jsx';
+import LowStockReport from './pages/ReportsSubPages/LowStockReport.jsx';
+import SalesByPeriodReport from './pages/ReportsSubPages/SalesByPeriodReport.jsx';
+import SalesByProductReport from './pages/ReportsSubPages/SalesByProductReport.jsx';
+
 const useMediaQuery = (query) => {
     const [matches, setMatches] = useState(window.matchMedia(query).matches);
     useEffect(() => {
@@ -145,6 +153,14 @@ const AppContent = () => {
                     
                     <Route path="/history" element={<HistoryPage />} />
                     <Route path="/history/:logId" element={<LogDetailsPage />} />
+                    
+                    <Route path="/reports" element={<ReportsPage />} />
+                    <Route path="/reports/inventory-summary" element={<InventorySummaryReport />} />
+                    <Route path="/reports/inventory-movement" element={<InventoryMovementReport />} />
+                    <Route path="/reports/low-stock" element={<LowStockReport />} />
+                    <Route path="/reports/sales-by-period" element={<SalesByPeriodReport />} />
+                    <Route path="/reports/sales-by-product" element={<SalesByProductReport />} />
+
                     <Route path="/settings" element={<SettingsPage />} />
                     <Route path="*" element={<div className="p-8 text-2xl text-red-500">404 Page Not Found</div>} />
                 </Routes>

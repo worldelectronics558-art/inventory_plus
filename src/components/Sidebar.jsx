@@ -5,7 +5,7 @@ import React, { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useUser } from '../contexts/UserContext.jsx';
-import { Cloud, CloudOff, ChevronRight, LayoutDashboard, Package, Warehouse, Users, Settings, LogOut, X, History, ShoppingCart, Truck } from 'lucide-react';
+import { Cloud, CloudOff, ChevronRight, LayoutDashboard, Package, Warehouse, Users, Settings, LogOut, X, History, ShoppingCart, Truck, BarChart2 } from 'lucide-react';
 
 const navItems = [
     { name: 'Dashboard', icon: LayoutDashboard, route: '/' },
@@ -15,6 +15,7 @@ const navItems = [
     { name: 'Sales', icon: Truck, route: '/sales', permission: 'canViewSales' },
     { name: 'Suppliers', icon: Users, route: '/suppliers', permission: 'canViewPurchasing' },
     { name: 'Customers', icon: Users, route: '/customers', permission: 'canViewCustomers' },
+    { name: 'Reports', icon: BarChart2, route: '/reports' },
     { name: 'History', icon: History, route: '/history' },
     { name: 'Settings', icon: Settings, route: './settings' },
 ];
